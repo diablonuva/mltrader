@@ -1,8 +1,12 @@
 version: "3.9"
 
 # ---------------------------------------------------------------------------
-# Memory limits tuned for Raspberry Pi 5 (8 GB).
-# Allocation: 3 GB trader + 1.5 GB dashboard + 3.5 GB OS/headroom
+# Pi 5 (8 GB) deployment.
+# mem_limit removed — Pi 5 kernel does not enable cgroup memory by default.
+# To re-enable memory limits later:
+#   sudo nano /boot/firmware/cmdline.txt
+#   Append (same line, space-separated): cgroup_enable=memory cgroup_memory=1
+#   sudo reboot
 # ---------------------------------------------------------------------------
 
 services:
@@ -17,7 +21,6 @@ services:
       - ./config:/app/config:ro    # read-only config mount
     restart: unless-stopped
     cpuset: "0,1"                  # Pin to CPU cores 0-1 (thermal isolation)
-    mem_limit: 3g                  # Pi 5 (8 GB): 3 GB trader + 1.5 GB dashboard + 3.5 GB OS
     logging:
       driver: "json-file"
       options:
@@ -25,9 +28,10 @@ services:
         max-file: "5"
     healthcheck:
       test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('logs') else 1)"]
-      interval: 60s
+      interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s            # give main.py 60s to initialise before health checks begin
 
   dashboard:
     build: .
@@ -44,7 +48,6 @@ services:
       - ./logs:/app/logs:ro         # read-only — dashboard never writes logs
     depends_on:
       trader:
-        condition: service_healthy
+        condition: service_started  # start once trader container exists, not waiting for healthy
     restart: unless-stopped
-    mem_limit: 1536m
     cpuset: "2,3"
