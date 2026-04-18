@@ -49,54 +49,113 @@ _ENV_PATH = _PROJECT_ROOT / ".env"
 st.markdown(
     """
     <style>
-        /* ── Base (desktop) ── */
+        /* ═══════════════════════════════════════════════
+           BASE
+        ═══════════════════════════════════════════════ */
         .block-container { padding-top: 2rem; max-width: 720px; }
-        .live-warning {
-            background: #b71c1c; color: #fff; border-radius: 8px;
-            padding: 14px 18px; font-weight: 700; font-size: 1rem;
-            margin-bottom: 1rem;
-        }
-        .paper-badge {
-            background: #546E7A; color: #fff; border-radius: 4px;
-            padding: 3px 10px; font-weight: 700; font-size: 0.85rem;
-        }
-        .live-badge {
-            background: #EF5350; color: #fff; border-radius: 4px;
-            padding: 3px 10px; font-weight: 700; font-size: 0.85rem;
-        }
-        .restart-banner {
-            background: #1a237e; color: #fff; border-radius: 6px;
-            padding: 10px 14px; font-size: 0.9rem; margin-top: 0.5rem;
+
+        /* ── Section divider cards ── */
+        .settings-section {
+            background: linear-gradient(160deg, #1a2040 0%, #161b2e 100%);
+            border: 1px solid #1f2235;
+            border-radius: 12px;
+            padding: 20px 22px;
+            margin-bottom: 1.2rem;
         }
 
-        /* ── Mobile — iPhone / small Android (≤ 768 px) ── */
+        /* ── Status badges ── */
+        .paper-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #1c3040; border: 1px solid #546E7A;
+            color: #80CBC4; border-radius: 20px;
+            padding: 4px 14px; font-weight: 700; font-size: 0.85rem;
+            letter-spacing: 0.03em;
+        }
+        .live-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #3e1111; border: 1px solid #EF5350;
+            color: #EF9A9A; border-radius: 20px;
+            padding: 4px 14px; font-weight: 700; font-size: 0.85rem;
+            letter-spacing: 0.03em;
+        }
+
+        /* ── Live mode warning banner ── */
+        .live-warning {
+            background: linear-gradient(135deg, #b71c1c 0%, #c62828 100%);
+            color: #fff; border-radius: 10px;
+            padding: 14px 18px; font-weight: 700; font-size: 1rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid #ff5252;
+            box-shadow: 0 4px 16px rgba(239,83,80,0.30);
+        }
+
+        /* ── Restart banner ── */
+        .restart-banner {
+            background: linear-gradient(135deg, #0d1b4b 0%, #1a237e 100%);
+            color: #c5cae9; border-radius: 8px;
+            padding: 12px 16px; font-size: 0.9rem; margin-top: 0.5rem;
+            border-left: 3px solid #2196F3;
+        }
+
+        /* ── Primary button (gradient blue) ── */
+        [data-testid="baseButton-primary"] {
+            background: linear-gradient(135deg, #1565C0 0%, #2196F3 100%) !important;
+            border: none !important;
+            border-radius: 8px !important;
+            color: #fff !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.04em !important;
+            box-shadow: 0 2px 10px rgba(33,150,243,0.30) !important;
+            transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+        }
+        [data-testid="baseButton-primary"]:hover:not(:disabled) {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 6px 22px rgba(33,150,243,0.50) !important;
+        }
+        [data-testid="baseButton-primary"]:active:not(:disabled) {
+            transform: translateY(0) !important;
+        }
+        [data-testid="baseButton-primary"]:disabled {
+            opacity: 0.35 !important; cursor: not-allowed !important;
+        }
+
+        /* ── Secondary button ── */
+        [data-testid="baseButton-secondary"] {
+            border: 1px solid #2a3050 !important;
+            border-radius: 8px !important;
+            background: transparent !important;
+            color: #9aa0b4 !important;
+            transition: border-color 0.15s, color 0.15s, background 0.15s !important;
+        }
+        [data-testid="baseButton-secondary"]:hover {
+            border-color: #2196F3 !important;
+            color: #e0e6ff !important;
+            background: rgba(33,150,243,0.07) !important;
+        }
+
+        /* ═══════════════════════════════════════════════
+           MOBILE  ≤ 768 px
+        ═══════════════════════════════════════════════ */
         @media screen and (max-width: 768px) {
             .block-container {
                 padding-left: 0.6rem !important;
                 padding-right: 0.6rem !important;
                 max-width: 100% !important;
             }
-            /* Stack credential columns — side-by-side password fields are unusable on phone */
             [data-testid="stHorizontalBlock"] {
-                flex-direction: column !important;
-                gap: 0 !important;
+                flex-direction: column !important; gap: 0 !important;
             }
             [data-testid="column"] {
-                width: 100% !important;
-                flex: 1 1 100% !important;
-                min-width: 0 !important;
+                width: 100% !important; flex: 1 1 100% !important; min-width: 0 !important;
             }
             h1 { font-size: 1.3rem !important; }
             h2, h3 { font-size: 1rem !important; }
-            /* 48 px save button — easier to tap */
-            .stButton > button {
-                min-height: 48px !important;
-                font-size: 1rem !important;
+            [data-testid="baseButton-primary"],
+            [data-testid="baseButton-secondary"] {
+                min-height: 48px !important; font-size: 1rem !important;
             }
-            .live-warning {
-                font-size: 0.88rem !important;
-                padding: 10px 12px !important;
-            }
+            .live-warning { font-size: 0.88rem !important; padding: 10px 12px !important; }
+            .settings-section { padding: 14px 12px !important; }
         }
     </style>
     """,
@@ -189,10 +248,10 @@ current_mode: str = _detect_mode(current_base_url)
 # Page header
 # ---------------------------------------------------------------------------
 
-st.title("⚙️ Broker Settings")
+st.title("⚙️ Broker & API Settings")
 st.caption(
-    "Changes are saved to `.env` and take effect after restarting the engine "
-    "(`python main.py`). The running engine is not affected until restarted."
+    "Changes are written to `.env` and take effect after the engine restarts. "
+    "The live engine is not interrupted until you restart it."
 )
 
 st.markdown("---")
@@ -201,7 +260,7 @@ st.markdown("---")
 # Section 1 — Trading Mode
 # ---------------------------------------------------------------------------
 
-st.subheader("Trading Mode")
+st.subheader("🔄 Trading Mode")
 
 mode_choice = st.radio(
     label="Select mode",
@@ -248,7 +307,7 @@ st.markdown("---")
 # Section 2 — API Credentials
 # ---------------------------------------------------------------------------
 
-st.subheader("API Credentials")
+st.subheader("🔑 API Credentials")
 
 st.caption(
     "Leave a field blank to keep the existing value. "
@@ -305,7 +364,7 @@ else:
 # Section 4 — Save button
 # ---------------------------------------------------------------------------
 
-save_label = "💾  Save Settings" + (" (blocked — confirm above)" if save_blocked else "")
+save_label = "💾  Save Settings" if not save_blocked else "🔒  Confirm live mode above to save"
 
 if st.button(
     save_label,
@@ -345,7 +404,7 @@ if st.button(
 # ---------------------------------------------------------------------------
 
 st.markdown("---")
-st.subheader("Active Engine State")
+st.subheader("⚡ Active Engine State")
 st.caption(
     "This reflects what the **running engine** is actually using "
     "(loaded from OS environment at startup). It may differ from the saved "

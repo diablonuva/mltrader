@@ -57,58 +57,128 @@ _REGIME_COLORS: dict[str, str] = {
 st.markdown(
     """
     <style>
-        /* ── Base (desktop) ── */
+        /* ═══════════════════════════════════════════════
+           BASE
+        ═══════════════════════════════════════════════ */
         .block-container { padding-top: 1.8rem; }
+
+        /* ── Metric cards ── */
         [data-testid="stMetricValue"] { font-size: 1.35rem; font-weight: 700; }
         [data-testid="stMetricLabel"] {
             font-size: 0.80rem; color: #9aa0b4;
             text-transform: uppercase; letter-spacing: 0.04em;
         }
         div[data-testid="metric-container"] {
-            background: #161b2e; border: 1px solid #1f2235;
+            background: linear-gradient(160deg, #1a2040 0%, #161b2e 100%);
+            border: 1px solid #1f2235;
+            border-top: 2px solid #2196F3;
             border-radius: 10px; padding: 14px 18px; margin-bottom: 8px;
+            transition: box-shadow 0.2s ease;
+        }
+        div[data-testid="metric-container"]:hover {
+            box-shadow: 0 4px 22px rgba(33,150,243,0.14);
         }
 
-        /* ── Mobile — iPhone / small Android (≤ 768 px) ── */
+        /* ── Primary button (gradient blue, lift on hover) ── */
+        [data-testid="baseButton-primary"] {
+            background: linear-gradient(135deg, #1565C0 0%, #2196F3 100%) !important;
+            border: none !important;
+            border-radius: 8px !important;
+            color: #fff !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.04em !important;
+            box-shadow: 0 2px 10px rgba(33,150,243,0.30) !important;
+            transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+        }
+        [data-testid="baseButton-primary"]:hover:not(:disabled) {
+            transform: translateY(-1px) !important;
+            box-shadow: 0 6px 22px rgba(33,150,243,0.50) !important;
+        }
+        [data-testid="baseButton-primary"]:active:not(:disabled) {
+            transform: translateY(0px) !important;
+        }
+        [data-testid="baseButton-primary"]:disabled {
+            opacity: 0.35 !important;
+            cursor: not-allowed !important;
+        }
+
+        /* ── Secondary button (outlined, blue border on hover) ── */
+        [data-testid="baseButton-secondary"] {
+            border: 1px solid #2a3050 !important;
+            border-radius: 8px !important;
+            background: transparent !important;
+            color: #9aa0b4 !important;
+            transition: border-color 0.15s ease, color 0.15s ease,
+                        background 0.15s ease !important;
+        }
+        [data-testid="baseButton-secondary"]:hover {
+            border-color: #2196F3 !important;
+            color: #e0e6ff !important;
+            background: rgba(33,150,243,0.07) !important;
+        }
+
+        /* ── Live status pulse dot ── */
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.35; }
+        }
+        .dot-live { animation: pulse-dot 2.2s ease-in-out infinite; display: inline-block; }
+
+        /* ── Expanders (positions / trades tables) ── */
+        [data-testid="stExpander"] {
+            border: 1px solid #1f2235 !important;
+            border-radius: 10px !important;
+            overflow: hidden !important;
+        }
+        details > summary {
+            font-weight: 600 !important;
+            font-size: 0.95rem !important;
+            padding: 12px 16px !important;
+        }
+
+        /* ── Plotly chart toolbar ── */
+        .modebar { background-color: transparent !important; }
+        .modebar-btn path { fill: rgba(154,160,180,0.40) !important; }
+        .modebar-btn:hover path { fill: #2196F3 !important; }
+
+        /* ── Sidebar ── */
+        [data-testid="stSidebar"] { border-right: 1px solid #1f2235; }
+        [data-testid="stSidebar"] .stMarkdown p { font-size: 0.87rem; }
+
+        /* ═══════════════════════════════════════════════
+           MOBILE  ≤ 768 px  (iPhone / small Android)
+        ═══════════════════════════════════════════════ */
         @media screen and (max-width: 768px) {
             .block-container {
                 padding-left: 0.6rem !important;
                 padding-right: 0.6rem !important;
                 padding-top: 0.8rem !important;
             }
-            /* Stack every 2-col row into a single column */
             [data-testid="stHorizontalBlock"] {
-                flex-direction: column !important;
-                gap: 0 !important;
+                flex-direction: column !important; gap: 0 !important;
             }
             [data-testid="column"] {
-                width: 100% !important;
-                flex: 1 1 100% !important;
-                min-width: 0 !important;
+                width: 100% !important; flex: 1 1 100% !important; min-width: 0 !important;
             }
-            /* Larger metric values — easier to read at arm's length */
             [data-testid="stMetricValue"] { font-size: 1.55rem !important; }
             div[data-testid="metric-container"] {
-                padding: 12px 14px !important;
-                margin-bottom: 6px !important;
+                padding: 12px 14px !important; margin-bottom: 6px !important;
             }
-            /* Scale down headings */
             h1 { font-size: 1.3rem !important; }
             h2, h3 { font-size: 1rem !important; }
-            /* 44 px minimum touch targets (Apple HIG) */
-            .stButton > button {
-                min-height: 44px !important;
-                font-size: 1rem !important;
+            [data-testid="baseButton-primary"],
+            [data-testid="baseButton-secondary"] {
+                min-height: 44px !important; font-size: 1rem !important;
             }
-            /* Tables — horizontal scroll rather than overflow-hidden */
             [data-testid="stDataFrame"] { overflow-x: auto !important; }
         }
 
-        /* ── Tablet portrait — iPad mini / Air (769 px – 1024 px) ── */
+        /* ═══════════════════════════════════════════════
+           TABLET PORTRAIT  769 – 1024 px  (iPad mini/Air)
+        ═══════════════════════════════════════════════ */
         @media screen and (min-width: 769px) and (max-width: 1024px) {
             .block-container {
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
+                padding-left: 1rem !important; padding-right: 1rem !important;
             }
         }
     </style>
@@ -369,12 +439,12 @@ with status_placeholder.container():
     with s2:
         if engine_live:
             st.markdown(
-                '<span style="color:#00E676;font-weight:700;">● CONNECTED</span>',
+                '<span class="dot-live" style="color:#00E676;font-weight:700;">● LIVE</span>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                '<span style="color:#EF5350;font-weight:700;">● DISCONNECTED</span>',
+                '<span style="color:#546E7A;font-weight:700;">● OFFLINE</span>',
                 unsafe_allow_html=True,
             )
 
@@ -402,7 +472,7 @@ st.markdown("---")
 # Section 2 — 📊 KPI Metric Cards
 # ---------------------------------------------------------------------------
 
-st.subheader("📊 Key Performance Indicators")
+st.subheader("📊 Performance")
 
 equity = state.get("equity", 0.0) if state else None
 cash = state.get("cash", 0.0) if state else None
@@ -496,7 +566,7 @@ st.markdown("---")
 # Section 3 — 📈 Equity Curve Chart
 # ---------------------------------------------------------------------------
 
-st.subheader("📈 Equity Curve (Last 30 min)")
+st.subheader("📈 Equity Curve — Last 30 min")
 
 equity_curve_30m = state.get("equity_curve_30m", []) if state else []
 
@@ -534,7 +604,7 @@ st.markdown("---")
 # Section 4 — 🧠 Regime / Signal Timeline Chart
 # ---------------------------------------------------------------------------
 
-st.subheader("🧠 Regime & Signal Timeline")
+st.subheader("🧠 Regime & Signals")
 
 last_10_signals = state.get("last_10_signals", []) if state else []
 
