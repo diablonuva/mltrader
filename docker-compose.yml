@@ -1,5 +1,10 @@
 version: "3.9"
 
+# ---------------------------------------------------------------------------
+# Memory limits tuned for Raspberry Pi 5 (8 GB).
+# Allocation: 3 GB trader + 1.5 GB dashboard + 3.5 GB OS/headroom
+# ---------------------------------------------------------------------------
+
 services:
   trader:
     build: .
@@ -12,7 +17,7 @@ services:
       - ./config:/app/config:ro    # read-only config mount
     restart: unless-stopped
     cpuset: "0,1"                  # Pin to CPU cores 0-1 (thermal isolation)
-    mem_limit: 4g                  # Cap at 4GB (leave 4GB for OS + dashboard)
+    mem_limit: 3g                  # Pi 5 (8 GB): 3 GB trader + 1.5 GB dashboard + 3.5 GB OS
     logging:
       driver: "json-file"
       options:
@@ -41,5 +46,5 @@ services:
       trader:
         condition: service_healthy
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 1536m
     cpuset: "2,3"
