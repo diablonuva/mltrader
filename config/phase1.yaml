@@ -1,0 +1,138 @@
+hmm:
+  n_components_candidates: [3, 4, 5]
+  n_components_default: 4
+  n_init: 10
+  covariance_type: "full"
+  n_iter: 200
+  tol: 1.0e-4
+  confidence_threshold: 0.55
+  min_train_bars: 400            # ~15 trading days of 15-min bars
+  retrain_every_bars: 130        # retrain every week (130 × 15-min)
+  stability_confirm_bars: 3
+  flicker_window_bars: 20
+  flicker_rate_threshold: 2.0
+
+lgbm:
+  n_estimators: 200
+  max_depth: 4
+  num_leaves: 15
+  learning_rate: 0.05
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_samples: 20
+  class_weight: "balanced"
+  confidence_threshold: 0.0    # disabled — HMM regime is the sole directional gate
+  label_lookahead_bars: 3
+  label_threshold_pct: 0.002
+  min_samples_per_regime: 30
+
+features:
+  bar_size: "15Min"
+  execution_bar_size: "1Min"
+  realized_vol_window: 20        # 20 × 15 min = 5 h lookback for vol
+  vol_ratio_short_window: 4      # 4 × 15 min = 1 h short vol
+  vol_ratio_long_window: 26      # 26 × 15 min = 1 day long vol
+  vwap_deviation_threshold: 0.008
+  volume_ratio_breakout_min: 2.0
+  volume_ratio_momentum_min: 1.2
+  bar_body_ratio_trend_min: 0.5
+  opening_range_bars: 2          # first 30 min = 2 × 15-min bars
+  outlier_clip_stds: 5.0
+
+strategy:
+  allow_short: false             # long-only: SPY macro uptrend 2023+ favours longs
+  regime_allocations:
+    SQUEEZE:       {allocation: 0.00, mode: "wait"}
+    TRENDING_UP:   {allocation: 0.80, mode: "momentum_long"}
+    TRENDING_DOWN: {allocation: 0.00, mode: "wait"}   # disabled: shorts fight SPY uptrend
+    BREAKOUT:      {allocation: 1.00, mode: "trend_follow"}
+    CHOPPY:        {allocation: 0.40, mode: "mean_reversion"}
+    UNKNOWN:       {allocation: 0.00, mode: "wait"}
+  stop_loss_atr_multiplier: 1.5
+  take_profit_atr_multiplier: 1.5  # 1:1 R:R — tuned to SPY 15-min ATR range
+  max_hold_bars:
+    momentum: 4          # 4 × 15 min = 1 h
+    breakout: 8          # 8 × 15 min = 2 h
+    mean_reversion: 2    # 2 × 15 min = 30 min
+  vwap_breakout_entry_threshold: 0.003
+  squeeze_vol_ratio_threshold: 0.4
+  or_entry_start_bar: 2          # enter after 30-min ORB (2 × 15-min)
+  or_no_entry_after_bar: 16      # no entries after 4 h open (16 × 15-min)
+
+  # Phase 1 — Trailing Stop + ADX gate  [ENABLED]
+  trailing_stop_enabled: true
+  trailing_stop_atr_mult: 2.0
+  adx_trending_min: 25           # require ADX > 25 for TRENDING_UP entries
+
+  # Phase 2 — EMA slope + ORB+VWAP breakout filter  [off in Phase 1]
+  ema_slope_filter: false
+  breakout_orb_vwap_filter: false
+
+  # Phase 3 — Partial take-profit  [off in Phase 1]
+  partial_tp_enabled: false
+  tp1_atr_multiplier: 1.0        # TP1 at 1.0× ATR (67% of full 1.5× target)
+  tp1_size_pct: 0.50             # close 50% at TP1, let 50% run to full TP
+  tp1_be_buffer_atr: 0.25        # after TP1: stop → entry + 0.25× ATR (not exact BE)
+
+backtest:
+  bar_size: "15Min"
+  train_bars_equity: 1300        # 1300 × 15 min = 50 trading days
+  test_bars_equity: 130          # 130 × 15 min = 5 trading days (one week OOS)
+  step_bars_equity: 130
+  initial_capital: 100000.0
+  slippage_pct:
+    "SPY": 0.0001
+  commission_equity_flat: 0.0
+  risk_free_rate: 0.02
+
+risk:
+  max_portfolio_leverage: 1.25
+  max_single_position_pct: 0.10
+  max_total_exposure_pct: 1.25
+  max_simultaneous_positions: 1  # single-asset pipeline: one position at a time
+  half_hour_dd_limit: 0.010
+  daily_dd_limit: 0.030
+  consecutive_loss_pause: 3
+  pause_duration_minutes: 120
+  max_trades_per_day_equity: 4   # sweet spot: covers real signal days (avg 1-2/day); blocks marginal 4th+ entries that are net losers in backtests
+
+pdt:
+  equity_threshold: 0.0          # SEC eliminated $25k PDT rule (April 2026)
+  max_daytrades_per_5d: 999      # no regulatory cap — internal risk limit is max_trades_per_day_equity
+  rolling_window_days: 5
+  pdt_counter_file: "logs/pdt_counter.json"
+
+session:
+  equity_session_start: "09:30"
+  equity_session_end: "16:00"
+  entry_blackout_open_minutes: 5
+  eod_soft_close_minutes: 10
+  eod_hard_close_minutes: 5
+  timezone: "America/New_York"
+
+# ---------------------------------------------------------------------------
+# Asset universe — SPY paper trading only
+#
+# Paper vs live is controlled exclusively by the ALPACA_BASE_URL environment
+# variable in your .env file:
+#   Paper : ALPACA_BASE_URL=https://paper-api.alpaca.markets
+#   Live  : ALPACA_BASE_URL=https://api.alpaca.markets  (requires confirmation)
+#
+# DO NOT add crypto symbols here. Crypto has incompatible volatility profiles
+# that require separate parameter tuning (different ATR multiples, commissions,
+# and session windows). Multi-asset runs degraded SPY performance by -19%.
+# ---------------------------------------------------------------------------
+assets:
+  primary_equity: ["SPY"]
+  primary_crypto: []             # intentionally empty — crypto decoupled
+
+monitoring:
+  log_dir: "logs"
+  shared_state_file: "shared_state.json"
+  dashboard_refresh_seconds: 5
+  dashboard_port: 8501
+  dashboard_host: "localhost"
+  alert_email_enabled: false
+  alert_webhook_enabled: false
+  alert_email_address: ""
+  alert_webhook_url: ""

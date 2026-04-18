@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  trader:
+    build: .
+    container_name: mltrader-engine
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./config:/app/config:ro    # read-only config mount
+    restart: unless-stopped
+    cpuset: "0,1"                  # Pin to CPU cores 0-1 (thermal isolation)
+    mem_limit: 4g                  # Cap at 4GB (leave 4GB for OS + dashboard)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('logs') else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    container_name: mltrader-dashboard
+    env_file: .env
+    command: >
+      streamlit run src/dashboard/app.py
+      --server.port 8501
+      --server.headless true
+      --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./logs:/app/logs:ro         # read-only — dashboard never writes logs
+    depends_on:
+      trader:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 2g
+    cpuset: "2,3"
