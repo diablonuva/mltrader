@@ -145,6 +145,25 @@ st.markdown(
         [data-testid="stSidebar"] { border-right: 1px solid #1f2235; }
         [data-testid="stSidebar"] .stMarkdown p { font-size: 0.87rem; }
 
+        /* ── Hide Streamlit's auto-generated multipage nav (we use st.page_link instead) ── */
+        [data-testid="stSidebarNav"] { display: none !important; }
+
+        /* ── Custom nav link pills ── */
+        [data-testid="stPageLink"] a {
+            border-radius: 8px !important;
+            padding: 6px 12px !important;
+            font-weight: 600 !important;
+            transition: background 0.15s ease !important;
+        }
+        [data-testid="stPageLink"] a:hover {
+            background: rgba(33,150,243,0.10) !important;
+        }
+        [data-testid="stPageLink"][aria-selected="true"] a,
+        [data-testid="stPageLink"] a[aria-selected="true"] {
+            background: rgba(33,150,243,0.15) !important;
+            border-left: 3px solid #2196F3 !important;
+        }
+
         /* ═══════════════════════════════════════════════
            MOBILE  ≤ 768 px  (iPhone / small Android)
         ═══════════════════════════════════════════════ */
@@ -330,7 +349,13 @@ engine_live: bool = state is not None and age_seconds <= 30
 # ⚙️ SIDEBAR
 # ---------------------------------------------------------------------------
 
-st.sidebar.header("⚙️ Configuration")
+# Custom multipage navigation (auto-nav hidden via CSS above)
+with st.sidebar:
+    st.page_link("app.py", label="Dashboard", icon="📊")
+    st.page_link("pages/1_Settings.py", label="Settings", icon="⚙️")
+
+st.sidebar.markdown("---")
+st.sidebar.header("Configuration")
 
 # Paper vs Live mode
 alpaca_url: str = os.environ.get("ALPACA_BASE_URL", "")
@@ -414,7 +439,10 @@ with st.sidebar.expander("🛡️ Risk Limits", expanded=False):
 # MAIN AREA — title
 # ---------------------------------------------------------------------------
 
-st.title("🧠 ML Trader — Diablo v1")
+st.markdown(
+    "<h1 style='text-align:center;letter-spacing:-0.01em;'>🧠 ML Trader — Diablo v1</h1>",
+    unsafe_allow_html=True,
+)
 
 # ---------------------------------------------------------------------------
 # Section 1 — Status bar

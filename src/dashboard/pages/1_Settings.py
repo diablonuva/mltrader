@@ -133,6 +133,23 @@ st.markdown(
             background: rgba(33,150,243,0.07) !important;
         }
 
+        /* ── Hide auto-generated nav, use st.page_link instead ── */
+        [data-testid="stSidebarNav"] { display: none !important; }
+        [data-testid="stPageLink"] a {
+            border-radius: 8px !important;
+            padding: 6px 12px !important;
+            font-weight: 600 !important;
+            transition: background 0.15s ease !important;
+        }
+        [data-testid="stPageLink"] a:hover {
+            background: rgba(33,150,243,0.10) !important;
+        }
+        [data-testid="stPageLink"][aria-selected="true"] a,
+        [data-testid="stPageLink"] a[aria-selected="true"] {
+            background: rgba(33,150,243,0.15) !important;
+            border-left: 3px solid #2196F3 !important;
+        }
+
         /* ═══════════════════════════════════════════════
            MOBILE  ≤ 768 px
         ═══════════════════════════════════════════════ */
@@ -243,6 +260,14 @@ current_api_key: str = env.get("ALPACA_API_KEY", "")
 current_secret_key: str = env.get("ALPACA_SECRET_KEY", "")
 current_base_url: str = env.get("ALPACA_BASE_URL", PAPER_URL)
 current_mode: str = _detect_mode(current_base_url)
+
+# ---------------------------------------------------------------------------
+# Sidebar nav (mirrors app.py)
+# ---------------------------------------------------------------------------
+
+with st.sidebar:
+    st.page_link("app.py", label="Dashboard", icon="📊")
+    st.page_link("pages/1_Settings.py", label="Settings", icon="⚙️")
 
 # ---------------------------------------------------------------------------
 # Page header
