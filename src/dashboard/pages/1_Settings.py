@@ -49,6 +49,7 @@ _ENV_PATH = _PROJECT_ROOT / ".env"
 st.markdown(
     """
     <style>
+        /* ── Base (desktop) ── */
         .block-container { padding-top: 2rem; max-width: 720px; }
         .live-warning {
             background: #b71c1c; color: #fff; border-radius: 8px;
@@ -66,6 +67,36 @@ st.markdown(
         .restart-banner {
             background: #1a237e; color: #fff; border-radius: 6px;
             padding: 10px 14px; font-size: 0.9rem; margin-top: 0.5rem;
+        }
+
+        /* ── Mobile — iPhone / small Android (≤ 768 px) ── */
+        @media screen and (max-width: 768px) {
+            .block-container {
+                padding-left: 0.6rem !important;
+                padding-right: 0.6rem !important;
+                max-width: 100% !important;
+            }
+            /* Stack credential columns — side-by-side password fields are unusable on phone */
+            [data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+                gap: 0 !important;
+            }
+            [data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 0 !important;
+            }
+            h1 { font-size: 1.3rem !important; }
+            h2, h3 { font-size: 1rem !important; }
+            /* 48 px save button — easier to tap */
+            .stButton > button {
+                min-height: 48px !important;
+                font-size: 1rem !important;
+            }
+            .live-warning {
+                font-size: 0.88rem !important;
+                padding: 10px 12px !important;
+            }
         }
     </style>
     """,

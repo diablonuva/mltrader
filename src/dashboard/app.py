@@ -57,6 +57,7 @@ _REGIME_COLORS: dict[str, str] = {
 st.markdown(
     """
     <style>
+        /* ── Base (desktop) ── */
         .block-container { padding-top: 1.8rem; }
         [data-testid="stMetricValue"] { font-size: 1.35rem; font-weight: 700; }
         [data-testid="stMetricLabel"] {
@@ -66,6 +67,49 @@ st.markdown(
         div[data-testid="metric-container"] {
             background: #161b2e; border: 1px solid #1f2235;
             border-radius: 10px; padding: 14px 18px; margin-bottom: 8px;
+        }
+
+        /* ── Mobile — iPhone / small Android (≤ 768 px) ── */
+        @media screen and (max-width: 768px) {
+            .block-container {
+                padding-left: 0.6rem !important;
+                padding-right: 0.6rem !important;
+                padding-top: 0.8rem !important;
+            }
+            /* Stack every 2-col row into a single column */
+            [data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+                gap: 0 !important;
+            }
+            [data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 0 !important;
+            }
+            /* Larger metric values — easier to read at arm's length */
+            [data-testid="stMetricValue"] { font-size: 1.55rem !important; }
+            div[data-testid="metric-container"] {
+                padding: 12px 14px !important;
+                margin-bottom: 6px !important;
+            }
+            /* Scale down headings */
+            h1 { font-size: 1.3rem !important; }
+            h2, h3 { font-size: 1rem !important; }
+            /* 44 px minimum touch targets (Apple HIG) */
+            .stButton > button {
+                min-height: 44px !important;
+                font-size: 1rem !important;
+            }
+            /* Tables — horizontal scroll rather than overflow-hidden */
+            [data-testid="stDataFrame"] { overflow-x: auto !important; }
+        }
+
+        /* ── Tablet portrait — iPad mini / Air (769 px – 1024 px) ── */
+        @media screen and (min-width: 769px) and (max-width: 1024px) {
+            .block-container {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
         }
     </style>
     """,
@@ -103,7 +147,7 @@ def _dark_layout() -> dict:
             x=0.01,
             y=0.98,
         ),
-        margin=dict(l=60, r=30, t=55, b=50),
+        margin=dict(l=40, r=16, t=48, b=40),
     )
 
 
@@ -479,7 +523,7 @@ fig_equity.update_layout(
     title="Portfolio Equity",
     xaxis_title="Time",
     yaxis_title="Equity (USD)",
-    height=570,
+    height=340,
     **_dark_layout(),
 )
 st.plotly_chart(fig_equity, use_container_width=True)
