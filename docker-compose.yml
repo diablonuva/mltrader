@@ -15,10 +15,12 @@ services:
     container_name: mltrader-engine
     env_file: .env
     volumes:
+      - ./src:/app/src:ro           # live-mount source — git pull + restart picks up changes
+      - ./config:/app/config:ro    # live-mount config — no rebuild needed for yaml changes
+      - ./main.py:/app/main.py:ro  # live-mount entrypoint
       - ./logs:/app/logs
       - ./models:/app/models
       - ./data:/app/data
-      - ./config:/app/config:ro    # read-only config mount
     restart: unless-stopped
     cpuset: "0,1"                  # Pin to CPU cores 0-1 (thermal isolation)
     logging:
@@ -45,6 +47,8 @@ services:
     ports:
       - "8501:8501"
     volumes:
+      - ./src:/app/src:ro           # live-mount source — git pull + restart picks up changes
+      - ./config:/app/config:ro    # live-mount config
       - ./logs:/app/logs:ro         # read-only — dashboard never writes logs
     depends_on:
       trader:
