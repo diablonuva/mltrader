@@ -164,6 +164,29 @@ st.markdown(
             border-left: 3px solid #2196F3 !important;
         }
 
+        /* ── Market clock pills ── */
+        .mkt-open {
+            display: inline-block;
+            background: rgba(0,230,118,0.10); border: 1px solid #00E676;
+            color: #00E676; border-radius: 20px;
+            padding: 5px 18px; font-weight: 700; font-size: 1rem;
+        }
+        .mkt-closed {
+            display: inline-block;
+            background: rgba(239,83,80,0.10); border: 1px solid #EF5350;
+            color: #EF5350; border-radius: 20px;
+            padding: 5px 18px; font-weight: 700; font-size: 1rem;
+        }
+        .clock-card {
+            background: linear-gradient(160deg,#1a2040 0%,#161b2e 100%);
+            border: 1px solid #1f2235; border-radius: 10px;
+            padding: 12px 16px; margin-bottom: 0.6rem; text-align: center;
+        }
+        .clock-label { font-size: 0.75rem; color: #9aa0b4; text-transform: uppercase; letter-spacing: 0.05em; }
+        .clock-time  { font-size: 1.25rem; font-weight: 700; color: #e0e6ff; }
+        .clock-sub   { font-size: 0.82rem; color: #9aa0b4; margin-top: 2px; }
+        .engine-mode { font-size: 0.82rem; font-weight: 600; margin-top: 4px; }
+
         /* ═══════════════════════════════════════════════
            MOBILE  ≤ 768 px  (iPhone / small Android)
         ═══════════════════════════════════════════════ */
@@ -312,6 +335,71 @@ def _load_trades_log(log_dir: str) -> list[dict]:
     return trades
 
 
+def _get_market_status() -> dict:
+    """Return NYSE open/closed status, next event time, and SA/ET clocks."""
+    try:
+        import exchange_calendars as xcals
+        import pandas as pd
+        import pytz as _pytz
+
+        et_tz = _pytz.timezone("America/New_York")
+        sast_tz = _pytz.timezone("Africa/Johannesburg")
+        now_utc = datetime.now(timezone.utc)
+        now_et = now_utc.astimezone(et_tz)
+        now_sast = now_utc.astimezone(sast_tz)
+
+        cal = xcals.get_calendar("NYSE")
+        today_ts = pd.Timestamp(now_et.date())
+
+        if cal.is_session(today_ts):
+            open_utc = cal.session_open(today_ts).to_pydatetime().replace(tzinfo=timezone.utc)
+            close_utc = cal.session_close(today_ts).to_pydatetime().replace(tzinfo=timezone.utc)
+            if open_utc <= now_utc < close_utc:
+                secs = int((close_utc - now_utc).total_seconds())
+                return {
+                    "is_open": True, "now_et": now_et, "now_sast": now_sast,
+                    "event_label": "Closes", "secs_to_event": secs,
+                    "event_et": close_utc.astimezone(et_tz),
+                    "event_sast": close_utc.astimezone(sast_tz),
+                }
+
+        # Market closed — find next session
+        future = cal.sessions[cal.sessions > today_ts]
+        if not len(future):
+            return {"is_open": False, "now_et": now_et, "now_sast": now_sast}
+        next_open_utc = cal.session_open(future[0]).to_pydatetime().replace(tzinfo=timezone.utc)
+        secs = int((next_open_utc - now_utc).total_seconds())
+        return {
+            "is_open": False, "now_et": now_et, "now_sast": now_sast,
+            "event_label": "Opens", "secs_to_event": secs,
+            "event_et": next_open_utc.astimezone(et_tz),
+            "event_sast": next_open_utc.astimezone(sast_tz),
+        }
+    except Exception:
+        return {"is_open": False, "now_et": None, "now_sast": None}
+
+
+def _fmt_countdown(secs: int) -> str:
+    if secs <= 0:
+        return "now"
+    h, rem = divmod(secs, 3600)
+    m = rem // 60
+    return f"{h}h {m:02d}m" if h > 0 else f"{m}m"
+
+
+def _engine_mode(live: bool, ms: dict, r_info: dict) -> tuple[str, str]:
+    """Return (label, hex-colour) for the current engine operating mode."""
+    if not live:
+        return "Offline", "#546E7A"
+    if not ms.get("is_open"):
+        return "Waiting — Market Closed", "#FF9800"
+    trained = any(
+        isinstance(v, dict) and v.get("regime", "UNKNOWN") != "UNKNOWN"
+        for v in r_info.values()
+    )
+    return ("Auto-Trading  ✦  Active", "#00E676") if trained else ("Accumulating Training Data", "#FF9800")
+
+
 # ---------------------------------------------------------------------------
 # Config loading (cached for session)
 # ---------------------------------------------------------------------------
@@ -344,6 +432,11 @@ except ImportError:
 state: Optional[dict] = _load_shared_state(shared_state_path)
 age_seconds: float = _state_age_seconds(state) if state else float("inf")
 engine_live: bool = state is not None and age_seconds <= 30
+
+# Market status + regime info (used by clock and engine-mode badge)
+_ms = _get_market_status()
+_regime_info: dict = state.get("regime_info", {}) if state else {}
+_mode_label, _mode_color = _engine_mode(engine_live, _ms, _regime_info)
 
 # ---------------------------------------------------------------------------
 # ⚙️ SIDEBAR
@@ -382,9 +475,15 @@ crypto_assets = assets_cfg.get("primary_crypto", ["BTC/USD", "ETH/USD"])
 all_assets = equity_assets + crypto_assets
 st.sidebar.markdown(f"**Assets:** {', '.join(all_assets)}")
 
-# Timezone
-sess_tz = cfg.get("session", {}).get("timezone", "America/New_York")
-st.sidebar.markdown(f"**Session TZ:** {sess_tz}")
+# Clock (SAST · ET · NYSE status)
+_sb_sast = _ms.get("now_sast")
+_sb_et   = _ms.get("now_et")
+if _sb_sast and _sb_et:
+    _nyse_status = "🟢 Open" if _ms.get("is_open") else "🔴 Closed"
+    st.sidebar.markdown(
+        f"🕐 **{_sb_sast.strftime('%H:%M')} SAST** · {_sb_et.strftime('%H:%M')} ET  \n"
+        f"NYSE {_nyse_status}"
+    )
 
 # Confidence thresholds
 hmm_conf = cfg.get("hmm", {}).get("confidence_threshold", 0.55)
@@ -445,13 +544,67 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
-# Section 1 — Status bar
+# Market Clock  (NYSE status · countdown · SAST / ET clocks)
+# ---------------------------------------------------------------------------
+
+mc1, mc2, mc3 = st.columns(3, gap="medium")
+
+with mc1:
+    mkt_pill = (
+        '<span class="mkt-open">🟢 NYSE OPEN</span>'
+        if _ms.get("is_open")
+        else '<span class="mkt-closed">🔴 NYSE CLOSED</span>'
+    )
+    event_label = _ms.get("event_label", "")
+    event_et   = _ms.get("event_et")
+    event_sast = _ms.get("event_sast")
+    countdown  = _fmt_countdown(_ms.get("secs_to_event", 0))
+    event_line = (
+        f"<div class='clock-sub'>{event_label} "
+        f"{event_et.strftime('%H:%M ET')} · {event_sast.strftime('%H:%M SAST')}"
+        f"&nbsp;&nbsp;⏱ {countdown}</div>"
+        if event_et else ""
+    )
+    st.markdown(
+        f"<div class='clock-card'>{mkt_pill}{event_line}</div>",
+        unsafe_allow_html=True,
+    )
+
+with mc2:
+    now_sast = _ms.get("now_sast")
+    now_et   = _ms.get("now_et")
+    if now_sast and now_et:
+        st.markdown(
+            f"<div class='clock-card'>"
+            f"<div class='clock-label'>South Africa</div>"
+            f"<div class='clock-time'>{now_sast.strftime('%H:%M')}"
+            f"<span style='font-size:0.7rem;color:#546E7A;'> SAST</span></div>"
+            f"<div class='clock-sub'>New York {now_et.strftime('%H:%M ET')}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("<div class='clock-card'><div class='clock-sub'>—</div></div>",
+                    unsafe_allow_html=True)
+
+with mc3:
+    dot = '<span class="dot-live">●</span>' if engine_live else '<span style="color:#546E7A;">●</span>'
+    mode_html = (
+        f"<div class='clock-label'>Engine</div>"
+        f"<div style='font-size:0.95rem;font-weight:700;color:#e0e6ff;margin:4px 0;'>"
+        f"{dot} {'LIVE' if engine_live else 'OFFLINE'}</div>"
+        f"<div class='engine-mode' style='color:{_mode_color};'>{_mode_label}</div>"
+    )
+    st.markdown(f"<div class='clock-card'>{mode_html}</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Section 1 — Status bar (last update · open positions)
 # ---------------------------------------------------------------------------
 
 status_placeholder = st.empty()
 
 with status_placeholder.container():
-    s1, s2, s3 = st.columns([2, 2, 3])
+    s1, s2 = st.columns([3, 3], gap="large")
     with s1:
         if state:
             ts_raw = state.get("timestamp", "")
@@ -465,24 +618,12 @@ with status_placeholder.container():
             st.markdown("**Last update:** —")
 
     with s2:
-        if engine_live:
-            st.markdown(
-                '<span class="dot-live" style="color:#00E676;font-weight:700;">● LIVE</span>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<span style="color:#546E7A;font-weight:700;">● OFFLINE</span>',
-                unsafe_allow_html=True,
-            )
-
-    with s3:
         if state:
             positions = state.get("positions", {})
             n_pos = len(positions)
             st.markdown(
-                f"**Session:** {'Active' if engine_live else 'Idle'} &nbsp;|&nbsp; "
-                f"**Open Positions:** {n_pos}"
+                f"**Open Positions:** {n_pos} &nbsp;|&nbsp; "
+                f"**Session:** {'Active' if engine_live else 'Idle'}"
             )
         else:
             st.markdown("**Session:** Waiting for engine …")
