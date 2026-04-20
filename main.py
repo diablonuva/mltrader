@@ -198,13 +198,55 @@ class MLTrader:
     # ------------------------------------------------------------------
 
     def _enqueue_bar(self, bar: BarData) -> None:
-        """Bridge from streaming threads into the asyncio queue."""
-        try:
-            self._bar_queue.put_nowait(bar)
-        except asyncio.QueueFull:
-            logger.warning(
-                "Bar queue full — dropping bar for %s @ %s", bar.symbol, bar.timestamp
-            )
+        """Bridge from streaming threads into the asyncio queue.
+
+        Must use call_soon_threadsafe — asyncio.Queue.put_nowait() is not
+        thread-safe when called from outside the running event loop (Python 3.10+).
+        Direct put_nowait() from a foreign thread adds to the deque but never
+        wakes the event loop's await queue.get(), so bars are silently lost.
+        """
+        loop: Optional[asyncio.AbstractEventLoop] = getattr(self, "_loop", None)
+        if loop and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._bar_queue.put_nowait, bar)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Bar queue full — dropping bar for %s @ %s", bar.symbol, bar.timestamp
+                )
+        else:
+            # Fallback before run() sets self._loop (should not occur in normal operation)
+            try:
+                self._bar_queue.put_nowait(bar)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Bar queue full (no loop) — dropping bar for %s @ %s",
+                    bar.symbol, bar.timestamp,
+                )
+
+    def _emit_state(self, now) -> None:
+        """Write shared_state.json on every processed bar — even before HMM is trained."""
+        if self._portfolio_state is None:
+            return
+        regime_info = {
+            a: {
+                "regime": (
+                    self._hmm_engines[a].get_current_regime().value
+                    if self._hmm_engines[a].is_trained else "UNKNOWN"
+                ),
+                "confidence": (
+                    self._hmm_engines[a].get_confidence()
+                    if self._hmm_engines[a].is_trained else 0.0
+                ),
+            }
+            for a in self._assets
+        }
+        self._equity_curve.append((now, self._portfolio_state.equity))
+        self._structured_logger.update_shared_state(
+            portfolio_state=self._portfolio_state,
+            regime_info=regime_info,
+            signal_history=self._orchestrator.get_signal_history(),
+            equity_curve=self._equity_curve,
+        )
 
     # ------------------------------------------------------------------
     # Core bar handler (runs on the asyncio event loop)
@@ -251,6 +293,7 @@ class MLTrader:
         raw_features = self._feature_engineers[asset].compute_features(bars_since_open)
         if raw_features is None:
             self._last_bar_time[asset] = now
+            self._emit_state(now)
             return
 
         # ----------------------------------------------------------------
@@ -259,6 +302,7 @@ class MLTrader:
         hmm = self._hmm_engines[asset]
         if not hmm.is_trained:
             self._last_bar_time[asset] = now
+            self._emit_state(now)
             return
 
         hmm.step(raw_features)
@@ -425,29 +469,7 @@ class MLTrader:
         # ----------------------------------------------------------------
         # Structured logging + dashboard shared state
         # ----------------------------------------------------------------
-        regime_info = {
-            a: {
-                "regime": (
-                    self._hmm_engines[a].get_current_regime().value
-                    if self._hmm_engines[a].is_trained else "UNKNOWN"
-                ),
-                "confidence": (
-                    self._hmm_engines[a].get_confidence()
-                    if self._hmm_engines[a].is_trained else 0.0
-                ),
-            }
-            for a in self._assets
-        }
-
-        if self._portfolio_state:
-            self._equity_curve.append((now, self._portfolio_state.equity))
-            self._structured_logger.update_shared_state(
-                portfolio_state=self._portfolio_state,
-                regime_info=regime_info,
-                signal_history=self._orchestrator.get_signal_history(),
-                equity_curve=self._equity_curve,
-            )
-
+        self._emit_state(now)
         self._last_bar_time[asset] = now
 
     # ------------------------------------------------------------------
@@ -599,6 +621,9 @@ class MLTrader:
 
     async def run(self) -> None:
         """Load models, subscribe to bars, then process the bar queue."""
+        # Capture the running loop so _enqueue_bar can use call_soon_threadsafe
+        self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+
         # Deferred broker import: keeps --help clean without a .env file
         from src.broker.alpaca_client import AlpacaClient
         from src.broker.broker_executor import BrokerExecutor
