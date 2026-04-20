@@ -128,7 +128,7 @@ assets:
 
 monitoring:
   log_dir: "logs"
-  shared_state_file: "shared_state.json"
+  shared_state_file: "logs/shared_state.json"
   dashboard_refresh_seconds: 5
   dashboard_port: 8501
   dashboard_host: "localhost"

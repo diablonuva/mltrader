@@ -37,19 +37,22 @@ services:
     build: .
     container_name: mltrader-dashboard
     env_file: .env
+    environment:
+      - HOME=/tmp                   # trader user has no home dir; Streamlit writes metrics to /tmp
     command: >
       streamlit run src/dashboard/app.py
       --server.port 8501
       --server.headless true
       --server.address 0.0.0.0
+      --browser.gatherUsageStats false
     ports:
       - "8501:8501"
     volumes:
       - ./src:/app/src:ro           # live-mount source — git pull + restart picks up changes
       - ./config:/app/config:ro    # live-mount config
-      - ./logs:/app/logs:ro         # read-only — dashboard never writes logs
+      - ./logs:/app/logs:ro         # shared with trader — includes shared_state.json
     depends_on:
       trader:
-        condition: service_started  # start once trader container exists, not waiting for healthy
+        condition: service_started
     restart: unless-stopped
     cpuset: "2,3"

@@ -765,7 +765,7 @@ fig_equity.update_layout(
     height=340,
     **_dark_layout(),
 )
-st.plotly_chart(fig_equity, use_container_width=True)
+st.plotly_chart(fig_equity, use_container_width=False, width="stretch")
 
 st.markdown("---")
 
@@ -885,7 +885,7 @@ fig_regime.update_layout(
     height=320,
     **_dark_layout(),
 )
-st.plotly_chart(fig_regime, use_container_width=True)
+st.plotly_chart(fig_regime, use_container_width=False, width="stretch")
 
 st.markdown("---")
 
@@ -924,7 +924,7 @@ with st.expander("📅 Open Positions", expanded=True):
             import pandas as pd
 
             df_pos = pd.DataFrame(rows)
-            st.dataframe(df_pos, use_container_width=True, hide_index=True)
+            st.dataframe(df_pos, hide_index=True, use_container_width=False, width="stretch")
         else:
             st.info("No open positions.")
     else:
@@ -955,7 +955,7 @@ with st.expander("📅 Today's Trades", expanded=False):
                     }
                 )
             df_trades = pd.DataFrame(trade_rows)
-            st.dataframe(df_trades, use_container_width=True, hide_index=True)
+            st.dataframe(df_trades, hide_index=True, use_container_width=False, width="stretch")
         except Exception as exc:
             st.warning(f"Could not load trade history: {exc}")
     else:
