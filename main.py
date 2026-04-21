@@ -640,12 +640,6 @@ class MLTrader:
                 "Could not fetch account state from Alpaca — check credentials."
             )
 
-        self._structured_logger.log_session_open(
-            assets=self._assets,
-            equity=self._portfolio_state.equity,
-            timestamp=datetime.now(timezone.utc),
-        )
-
         # Attempt to warm up from persisted models
         for asset in self._assets:
             self._initial_model_load(asset)
