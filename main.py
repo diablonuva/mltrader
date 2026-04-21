@@ -14,7 +14,7 @@ import signal
 import sys
 import threading
 import traceback
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -131,6 +131,7 @@ class MLTrader:
         self._last_bar_time: dict[str, datetime] = {}
         self._retrain_bar_counters: dict[str, int] = {}
         self._prev_regime: dict[str, Optional[RegimeLabel]] = {}
+        self._last_eod_report_date: Optional[date] = None
 
         # Thread pool for background HMM/LGBM retraining (max 2 workers)
         self._executor = concurrent.futures.ThreadPoolExecutor(
@@ -424,6 +425,26 @@ class MLTrader:
                         self._alerting.eod_flat_failed(pos_asset, now)
 
         # ----------------------------------------------------------------
+        # EOD performance report — fire once per day on first bar in the
+        # hard-close window (≥ 15:55 ET), regardless of open positions
+        # ----------------------------------------------------------------
+        eod_today = now.date()
+        if (
+            self._session_manager.is_eod_hard_close(asset, now)
+            and self._last_eod_report_date != eod_today
+            and self._portfolio_state is not None
+        ):
+            self._last_eod_report_date = eod_today
+            try:
+                self._reporter.on_session_close(
+                    today=eod_today,
+                    equity_end=self._portfolio_state.equity,
+                    equity_start_of_day=self._portfolio_state.session_open_equity,
+                )
+            except Exception:
+                logger.error("EOD report failed:\n%s", traceback.format_exc())
+
+        # ----------------------------------------------------------------
         # PDT approaching warning
         # ----------------------------------------------------------------
         pdt_remaining = self._pdt_guard.get_remaining_trades()
@@ -710,17 +731,20 @@ class MLTrader:
                 )
             except Exception:
                 pass
-            try:
-                self._reporter.on_session_close(
-                    today=datetime.now(timezone.utc).date(),
-                    equity_end=self._portfolio_state.equity,
-                    equity_start_of_day=self._portfolio_state.session_open_equity,
-                )
-            except Exception:
-                logger.error(
-                    "PerformanceReporter.on_session_close failed:\n%s",
-                    traceback.format_exc(),
-                )
+            # Only send shutdown report if EOD report hasn't already fired today
+            shutdown_today = datetime.now(timezone.utc).date()
+            if self._last_eod_report_date != shutdown_today:
+                try:
+                    self._reporter.on_session_close(
+                        today=shutdown_today,
+                        equity_end=self._portfolio_state.equity,
+                        equity_start_of_day=self._portfolio_state.session_open_equity,
+                    )
+                except Exception:
+                    logger.error(
+                        "PerformanceReporter.on_session_close failed:\n%s",
+                        traceback.format_exc(),
+                    )
 
         try:
             self._structured_logger.flush()

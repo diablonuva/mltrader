@@ -9,7 +9,8 @@ dist/
 build/
 .venv/
 venv/
-logs/
+logs/*
+!logs/troubleshooting/
 models/
 data/
 shared_state.json
