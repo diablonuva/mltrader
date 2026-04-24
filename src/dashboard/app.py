@@ -387,17 +387,20 @@ def _fmt_countdown(secs: int) -> str:
     return f"{h}h {m:02d}m" if h > 0 else f"{m}m"
 
 
-def _engine_mode(live: bool, ms: dict, r_info: dict) -> tuple[str, str]:
+def _engine_mode(live: bool, ms: dict, r_info: dict, state: Optional[dict] = None) -> tuple[str, str]:
     """Return (label, hex-colour) for the current engine operating mode."""
     if not live:
         return "Offline", "#546E7A"
     if not ms.get("is_open"):
         return "Waiting — Market Closed", "#FF9800"
-    trained = any(
+    trained = state.get("hmm_trained", False) if state else any(
         isinstance(v, dict) and v.get("regime", "UNKNOWN") != "UNKNOWN"
         for v in r_info.values()
     )
-    return ("Auto-Trading  ✦  Active", "#00E676") if trained else ("Accumulating Training Data", "#FF9800")
+    if trained:
+        return "Auto-Trading  ✦  Active", "#00E676"
+    pct = state.get("training_pct", 0) if state else 0
+    return f"Accumulating Training Data  ({pct:.0f}%)", "#FF9800"
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +439,7 @@ engine_live: bool = state is not None and age_seconds <= 30
 # Market status + regime info (used by clock and engine-mode badge)
 _ms = _get_market_status()
 _regime_info: dict = state.get("regime_info", {}) if state else {}
-_mode_label, _mode_color = _engine_mode(engine_live, _ms, _regime_info)
+_mode_label, _mode_color = _engine_mode(engine_live, _ms, _regime_info, state)
 
 # ---------------------------------------------------------------------------
 # ⚙️ SIDEBAR
@@ -596,6 +599,28 @@ with mc3:
         f"<div class='engine-mode' style='color:{_mode_color};'>{_mode_label}</div>"
     )
     st.markdown(f"<div class='clock-card'>{mode_html}</div>", unsafe_allow_html=True)
+
+# Training progress bar — shown only while HMM is accumulating data
+if engine_live and state and not state.get("hmm_trained", False):
+    _t_bars = state.get("training_bars", 0)
+    _t_need = state.get("training_needed", 390)
+    _t_pct  = min(_t_bars / _t_need, 1.0) if _t_need else 1.0
+    st.markdown(
+        f"""
+        <div style="margin:10px 0 4px 0;font-size:0.78rem;color:#9aa0b4;
+                    display:flex;justify-content:space-between;">
+          <span>📊 HMM Training Progress</span>
+          <span>{_t_bars:,} / {_t_need:,} bars &nbsp;·&nbsp; {_t_pct*100:.0f}%</span>
+        </div>
+        <div style="background:#1a1e2e;border-radius:6px;height:8px;overflow:hidden;">
+          <div style="background:linear-gradient(90deg,#FF9800,#FFB74D);
+                      width:{_t_pct*100:.1f}%;height:100%;border-radius:6px;
+                      transition:width 0.4s ease;">
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Section 1 — Status bar (last update · open positions)

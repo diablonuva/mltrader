@@ -308,6 +308,8 @@ class StructuredLogger:
         regime_info: dict,
         signal_history: list,
         equity_curve: list,
+        training_bars: int = 0,
+        training_needed: int = 0,
     ) -> None:
         """Write dashboard snapshot JSON to shared_state_path (atomic write)."""
         positions_serialised = {}
@@ -357,6 +359,10 @@ class StructuredLogger:
             "regime_info": regime_info,
             "last_10_signals": last_10,
             "equity_curve_30m": equity_curve_30m,
+            "training_bars": training_bars,
+            "training_needed": training_needed,
+            "training_pct": round(min(training_bars / training_needed * 100, 100), 1) if training_needed else 100.0,
+            "hmm_trained": any(r.get("regime", "UNKNOWN") != "UNKNOWN" for r in regime_info.values()),
         }
 
         # Atomic write: temp file then rename

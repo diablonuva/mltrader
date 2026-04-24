@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import concurrent.futures
 import logging
 import os
@@ -132,6 +133,13 @@ class MLTrader:
         self._retrain_bar_counters: dict[str, int] = {}
         self._prev_regime: dict[str, Optional[RegimeLabel]] = {}
         self._last_eod_report_date: Optional[date] = None
+        self._session_trade_count: int = 0
+
+        # Long-lived bar archive for HMM/LGBM training — kept across session
+        # resets (the FeatureEngineer._history only holds 36 bars; this holds
+        # enough history to satisfy min_train_bars across multiple trading days)
+        _train_archive_maxlen: int = 2000   # ~5 trading days of 1-min bars
+        self._bar_archives: dict[str, collections.deque] = {}
 
         # Thread pool for background HMM/LGBM retraining (max 2 workers)
         self._executor = concurrent.futures.ThreadPoolExecutor(
@@ -186,6 +194,7 @@ class MLTrader:
             self._lgbm_routers[asset] = LGBMExpertRouter(config, asset)
             self._retrain_locks[asset] = threading.Lock()
             self._retrain_bar_counters[asset] = 0
+            self._bar_archives[asset] = collections.deque(maxlen=_train_archive_maxlen)
 
         # ----------------------------------------------------------------
         # Broker — deferred until run() so --help works without .env
@@ -242,11 +251,16 @@ class MLTrader:
             for a in self._assets
         }
         self._equity_curve.append((now, self._portfolio_state.equity))
+        min_train = self._config["hmm"].get("min_train_bars", 390)
+        archive_sizes = {a: len(self._bar_archives.get(a, [])) for a in self._assets}
+        total_archive = sum(archive_sizes.values())
         self._structured_logger.update_shared_state(
             portfolio_state=self._portfolio_state,
             regime_info=regime_info,
             signal_history=self._orchestrator.get_signal_history(),
             equity_curve=self._equity_curve,
+            training_bars=total_archive,
+            training_needed=min_train,
         )
 
     # ------------------------------------------------------------------
@@ -269,6 +283,8 @@ class MLTrader:
             self._feature_engineers[asset].reset_session()
             self._circuit_breaker.reset_session()
             self._risk_manager.reset_daily_counts()
+            self._session_trade_count = 0
+            self._equity_curve = []
 
             self._portfolio_state = self._refresh_portfolio_state()
             if self._portfolio_state:
@@ -285,6 +301,7 @@ class MLTrader:
                 )
 
         self._session_manager.increment_bar(asset)
+        self._bar_archives[asset].append(bar)  # cross-session archive for retraining
 
         # ----------------------------------------------------------------
         # Feature computation
@@ -394,6 +411,7 @@ class MLTrader:
                 )
                 if order:
                     self._risk_manager.record_trade_open(asset)
+                    self._session_trade_count += 1
                     logger.info(
                         "ORDER_SUBMITTED  %s %s  size_pct=%.3f  order_id=%s",
                         signal.direction.value, asset,
@@ -539,7 +557,7 @@ class MLTrader:
         try:
             logger.info("RETRAIN_STARTED [%s]", asset)
 
-            bars = list(self._feature_engineers[asset]._history)
+            bars = list(self._bar_archives[asset])
             if not bars:
                 logger.warning("RETRAIN_ABORTED [%s]: no bar history", asset)
                 return
@@ -724,7 +742,7 @@ class MLTrader:
         if self._portfolio_state is not None:
             try:
                 self._structured_logger.log_session_close(
-                    trades_today=len(self._equity_curve),
+                    trades_today=self._session_trade_count,
                     pnl=self._portfolio_state.daily_pnl,
                     equity=self._portfolio_state.equity,
                     timestamp=datetime.now(timezone.utc),

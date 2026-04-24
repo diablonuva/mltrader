@@ -6,8 +6,8 @@ hmm:
   n_iter: 200
   tol: 1.0e-4
   confidence_threshold: 0.55
-  min_train_bars: 400            # ~15 trading days of 15-min bars
-  retrain_every_bars: 130        # retrain every week (130 × 15-min)
+  min_train_bars: 390            # one full NYSE session of 1-min bars (13:30–20:00 UTC)
+  retrain_every_bars: 390        # retrain daily (390 × 1-min bars per session)
   stability_confirm_bars: 3
   flicker_window_bars: 20
   flicker_rate_threshold: 2.0
