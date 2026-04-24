@@ -145,8 +145,8 @@ export default function StatsGrid({ trades }: Props) {
                 background: '#111827', border: '1px solid #1e293b',
                 borderRadius: '8px', fontSize: '11px', fontFamily: 'JetBrains Mono', color: '#e2e8f0',
               }}
-              formatter={(val: number, _: string, props: { payload: { count: number; winRate: number } }) => [
-                `${currency(val)} · ${props.payload.winRate}% WR · ${props.payload.count} trades`,
+              formatter={(val: number, _: string, props: { payload?: { count: number; winRate: number } }) => [
+                `${currency(val)} · ${props.payload?.winRate ?? 0}% WR · ${props.payload?.count ?? 0} trades`,
                 'P&L',
               ]}
             />
