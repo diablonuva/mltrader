@@ -42,10 +42,12 @@ services:
     environment:
       - NODE_ENV=production
       - LOGS_DIR=/app/logs          # Next.js API routes read shared_state.json from here
+      - CONFIG_DIR=/app/config      # Next.js /api/config reads settings.yaml from here
     ports:
       - "8501:3000"                 # external :8501 stays the same — internal Next.js runs on :3000
     volumes:
       - ./logs:/app/logs:ro         # shared with trader — includes shared_state.json and trades.log
+      - ./config:/app/config:ro     # read-only config — settings.yaml displayed in Settings page
     depends_on:
       trader:
         condition: service_started

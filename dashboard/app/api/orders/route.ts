@@ -8,27 +8,27 @@ const LOGS_DIR = process.env.LOGS_DIR || '/app/logs'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
   const all = searchParams.get('period') === 'all'
 
   try {
-    const raw = readFileSync(join(LOGS_DIR, 'trades.log'), 'utf-8')
-    let trades = raw
+    const raw = readFileSync(join(LOGS_DIR, 'orders.log'), 'utf-8')
+    let records = raw
       .split('\n')
       .filter(Boolean)
       .map((line) => {
         try { return JSON.parse(line) } catch { return null }
       })
-      .filter((t) => t && t.event === 'TRADE_COMPLETED')
+      .filter((r) => r && r.event === 'ORDER')
 
     if (!all) {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-      trades = trades.filter((t) => {
-        const d = new Date(t.ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+      records = records.filter((r) => {
+        const d = new Date(r.ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
         return d === today
       })
     }
 
-    return NextResponse.json(trades)
+    return NextResponse.json(records)
   } catch {
     return NextResponse.json([])
   }

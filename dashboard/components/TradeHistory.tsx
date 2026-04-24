@@ -4,6 +4,7 @@ import clsx from 'clsx'
 
 interface Props {
   trades: Trade[]
+  showAll?: boolean
 }
 
 const REGIME_COLOR: Record<string, string> = {
@@ -15,14 +16,16 @@ const REGIME_COLOR: Record<string, string> = {
   UNKNOWN:       'text-[#475569]',
 }
 
-export default function TradeHistory({ trades }: Props) {
+export default function TradeHistory({ trades, showAll = false }: Props) {
+  const title = showAll ? 'Full Trade History' : 'Trade History — Today'
+
   if (trades.length === 0) {
     return (
       <div className="card p-4">
         <h2 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium mb-4">
-          Trade History — Today
+          {title}
         </h2>
-        <p className="text-[#475569] text-sm">No completed trades today</p>
+        <p className="text-[#475569] text-sm">{showAll ? 'No trades recorded' : 'No completed trades today'}</p>
       </div>
     )
   }
@@ -35,7 +38,7 @@ export default function TradeHistory({ trades }: Props) {
     <div className="card p-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
         <h2 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium">
-          Trade History — Today
+          {title}
         </h2>
         <div className="flex items-center gap-4 text-xs font-mono">
           <span className="text-[#64748b]">
