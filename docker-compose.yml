@@ -34,25 +34,25 @@ services:
       start_period: 60s            # give main.py 60s to initialise before health checks begin
 
   dashboard:
-    build: .
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.dashboard
     container_name: mltrader-dashboard
     env_file: .env
     environment:
-      - HOME=/tmp                   # trader user has no home dir; Streamlit writes metrics to /tmp
-    command: >
-      streamlit run src/dashboard/app.py
-      --server.port 8501
-      --server.headless true
-      --server.address 0.0.0.0
-      --browser.gatherUsageStats false
+      - NODE_ENV=production
+      - LOGS_DIR=/app/logs          # Next.js API routes read shared_state.json from here
     ports:
-      - "8501:8501"
+      - "8501:3000"                 # external :8501 stays the same — internal Next.js runs on :3000
     volumes:
-      - ./src:/app/src:ro           # live-mount source — git pull + restart picks up changes
-      - ./config:/app/config:ro    # live-mount config
-      - ./logs:/app/logs:ro         # shared with trader — includes shared_state.json
+      - ./logs:/app/logs:ro         # shared with trader — includes shared_state.json and trades.log
     depends_on:
       trader:
         condition: service_started
     restart: unless-stopped
     cpuset: "2,3"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

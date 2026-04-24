@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #0a0e1a;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Thin scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0a0e1a; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+/* Card base */
+.card {
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  transition: border-color 0.2s ease;
+}
+.card:hover { border-color: #334155; }
+
+/* Live pulse for status dot */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px #00ff87; }
+  50%       { opacity: 0.6; box-shadow: 0 0 2px #00ff87; }
+}
+.live-dot { animation: live-pulse 2s ease-in-out infinite; }
+
+/* Amber pulse for training dot */
+@keyframes amber-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px #f59e0b; }
+  50%       { opacity: 0.6; box-shadow: 0 0 2px #f59e0b; }
+}
+.amber-dot { animation: amber-pulse 2s ease-in-out infinite; }
+
+/* Row hover in tables */
+tbody tr { transition: background-color 0.15s ease; }
+tbody tr:hover { background-color: rgba(26, 34, 54, 0.6); }
