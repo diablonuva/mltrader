@@ -19,3 +19,8 @@ shared_state.json
 *.pkl
 .DS_Store
 Thumbs.db
+
+# Next.js / Node
+dashboard/node_modules/
+dashboard/.next/
+dashboard/tsconfig.tsbuildinfo
