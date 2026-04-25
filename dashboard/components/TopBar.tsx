@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { Meta } from '@/lib/types'
-import { etTime, sastTime, isNyseOpen } from '@/lib/format'
+import { etTime, sastTime, isNyseOpen, nextMarketEvent, formatCountdown } from '@/lib/format'
 import clsx from 'clsx'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -24,8 +24,10 @@ export default function TopBar({ onMenuClick }: Props) {
     return () => clearInterval(id)
   }, [])
 
-  const nyseOpen = isNyseOpen()
-  const mode = meta?.mode ?? 'PAPER'
+  const nyseOpen   = isNyseOpen(now)
+  const market     = nextMarketEvent(now)
+  const countdown  = formatCountdown(market.seconds)
+  const mode       = meta?.mode ?? 'PAPER'
 
   return (
     <header className="shrink-0 h-14 bg-[#0d1117] border-b border-[#1e293b] flex items-center px-4 sm:px-6 gap-3">
@@ -40,32 +42,41 @@ export default function TopBar({ onMenuClick }: Props) {
         </svg>
       </button>
 
-      {/* Page title slot (hidden on desktop — sidebar shows brand) */}
+      {/* Page title on mobile (sidebar hidden) */}
       <span className="lg:hidden text-sm font-semibold text-[#e2e8f0]">ML Trader</span>
 
       <div className="flex-1" />
 
-      {/* NYSE badge */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      {/* NYSE status + countdown */}
+      <div className="flex items-center gap-2 shrink-0">
         <span
           className={clsx(
             'w-2 h-2 rounded-full shrink-0',
             nyseOpen ? 'bg-[#00ff87] live-dot' : 'bg-[#334155]'
           )}
         />
-        <span
-          className={clsx(
-            'text-xs font-mono font-medium hidden sm:inline',
-            nyseOpen ? 'text-[#00ff87]' : 'text-[#475569]'
-          )}
-        >
-          NYSE&nbsp;{nyseOpen ? 'OPEN' : 'CLOSED'}
-        </span>
+        <div className="flex flex-col leading-none">
+          <span
+            className={clsx(
+              'text-[11px] font-mono font-semibold',
+              nyseOpen ? 'text-[#00ff87]' : 'text-[#475569]'
+            )}
+          >
+            NYSE&nbsp;{nyseOpen ? 'OPEN' : 'CLOSED'}
+          </span>
+          {/* Countdown line */}
+          <span className={clsx(
+            'text-[10px] font-mono tabular-nums',
+            nyseOpen ? 'text-[#00c96b]' : 'text-[#334155]'
+          )}>
+            {market.label}&nbsp;{countdown}
+          </span>
+        </div>
       </div>
 
-      {/* Clocks */}
+      {/* Clocks — hidden on small screens */}
       <div className="hidden md:flex items-center gap-5 shrink-0">
-        <Clock label="ET" time={etTime(now)} />
+        <Clock label="ET"   time={etTime(now)}   />
         <Clock label="SAST" time={sastTime(now)} />
       </div>
 
@@ -88,7 +99,7 @@ function Clock({ label, time }: { label: string; time: string }) {
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-[10px] text-[#334155] uppercase tracking-widest font-medium">{label}</span>
-      <span className="text-xs font-mono text-[#64748b]">{time}</span>
+      <span className="text-xs font-mono text-[#64748b] tabular-nums">{time}</span>
     </div>
   )
 }

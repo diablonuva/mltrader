@@ -1,4 +1,7 @@
+'use client'
+
 import { SharedState } from '@/lib/types'
+import { isNyseOpen } from '@/lib/format'
 
 interface Props {
   state?: SharedState
@@ -9,6 +12,8 @@ type Mode = 'offline' | 'waiting' | 'training' | 'trading'
 function resolveMode(state?: SharedState): Mode {
   if (!state) return 'offline'
   if (state.hmm_trained) return 'trading'
+  // If markets are closed, always show "waiting" — no new bars are coming
+  if (!isNyseOpen()) return 'waiting'
   if (state.training_bars > 0) return 'training'
   return 'waiting'
 }
@@ -48,9 +53,9 @@ const MODES: Record<
 }
 
 export default function EngineMode({ state }: Props) {
-  const mode = resolveMode(state)
-  const cfg = MODES[mode]
-  const bars = state?.training_bars ?? 0
+  const mode   = resolveMode(state)
+  const cfg    = MODES[mode]
+  const bars   = state?.training_bars   ?? 0
   const needed = state?.training_needed ?? 390
   const pctRaw = needed > 0 ? Math.min((bars / needed) * 100, 100) : 100
 
@@ -77,10 +82,15 @@ export default function EngineMode({ state }: Props) {
         {mode === 'offline' && (
           <span className="text-xs text-[#64748b]">Waiting for shared_state.json</span>
         )}
+        {mode === 'waiting' && state && bars > 0 && (
+          <span className="text-xs font-mono text-[#64748b]">
+            {bars} bars collected · HMM trains next session open
+          </span>
+        )}
       </div>
 
       {mode === 'training' && (
-        <div className="mt-3 space-y-1">
+        <div className="mt-3">
           <div className="w-full bg-[#1e293b] rounded-full h-1.5 overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700 ease-out"
