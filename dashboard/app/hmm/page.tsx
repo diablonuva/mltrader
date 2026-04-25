@@ -1,9 +1,16 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import type { SharedState } from '@/lib/types'
 import RegimeTimeline from '@/components/RegimeTimeline'
+import ConfidenceTrend from '@/components/ConfidenceTrend'
+import { isNyseOpen, nextMarketEvent, formatCountdown } from '@/lib/format'
 import clsx from 'clsx'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, Cell,
+} from 'recharts'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -16,16 +23,124 @@ const REGIME_STYLE: Record<string, { text: string; bg: string; border: string }>
   UNKNOWN:       { text: '#64748b', bg: 'rgba(100,116,139,0.08)', border: 'rgba(100,116,139,0.2)' },
 }
 
-export default function HmmPage() {
-  const { data: state }   = useSWR<SharedState>('/api/state', fetcher, { refreshInterval: 5000, revalidateOnFocus: false })
-  const { data: history = [] } = useSWR('/api/regime-history', fetcher, { refreshInterval: 30000, revalidateOnFocus: false })
+const REGIME_FILL: Record<string, string> = {
+  TRENDING_UP: '#00ff87', TRENDING_DOWN: '#ff4d6d', BREAKOUT: '#60a5fa',
+  SQUEEZE: '#fbbf24', CHOPPY: '#f97316', UNKNOWN: '#64748b',
+}
 
-  const regimeInfo   = state?.regime_info ?? {}
-  const assets       = Object.entries(regimeInfo)
-  const trained      = state?.hmm_trained ?? false
-  const trainBars    = state?.training_bars ?? 0
-  const trainNeeded  = state?.training_needed ?? 390
-  const trainPct     = state?.training_pct ?? 0
+type TrainingPhase = 'offline' | 'collecting' | 'ready' | 'trained'
+
+function resolvePhase(state?: SharedState, open?: boolean): TrainingPhase {
+  if (!state) return 'offline'
+  if (state.hmm_trained) return 'trained'
+  const bars    = state.training_bars   ?? 0
+  const needed  = state.training_needed ?? 390
+  if (bars >= needed) return 'ready'
+  if (open && bars > 0) return 'collecting'
+  return 'collecting'
+}
+
+export default function HmmPage() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const { data: state } = useSWR<SharedState>('/api/state', fetcher, {
+    refreshInterval: 5000, revalidateOnFocus: false,
+  })
+  const { data: history = [] } = useSWR('/api/regime-history', fetcher, {
+    refreshInterval: 30000, revalidateOnFocus: false,
+  })
+
+  const nyseOpen    = isNyseOpen(now)
+  const market      = nextMarketEvent(now)
+  const countdown   = formatCountdown(market.seconds)
+
+  const trained     = state?.hmm_trained ?? false
+  const trainBars   = state?.training_bars   ?? 0
+  const trainNeeded = state?.training_needed ?? 390
+  const remaining   = Math.max(0, trainNeeded - trainBars)
+  const trainPct    = trainNeeded > 0 ? Math.min((trainBars / trainNeeded) * 100, 100) : 100
+  const phase       = resolvePhase(state, nyseOpen)
+
+  const regimeInfo  = state?.regime_info ?? {}
+  const assets      = Object.entries(regimeInfo)
+
+  // Next market open as a human-readable string
+  const nextOpenStr = (() => {
+    const d = new Date(now.getTime() + market.seconds * 1000)
+    return d.toLocaleString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false, timeZone: 'America/New_York',
+    }) + ' ET'
+  })()
+
+  // Sessions remaining estimate (390 bars ≈ 1 full trading session)
+  const sessionsRemaining = trainNeeded > 0 ? (remaining / trainNeeded) : 0
+
+  // Training roadmap bar data
+  const roadmapData = [
+    { label: 'Collected', value: Math.min(trainBars, trainNeeded), max: trainNeeded, positive: true },
+    { label: 'Remaining', value: remaining, max: trainNeeded, positive: false },
+  ]
+
+  // Regime stats from history
+  const recentHistory = history.slice(-200)
+  const regimeDist: Record<string, { count: number; totalConf: number }> = {}
+  for (const r of recentHistory) {
+    const k = r.new_regime as string
+    if (!regimeDist[k]) regimeDist[k] = { count: 0, totalConf: 0 }
+    regimeDist[k].count++
+    regimeDist[k].totalConf += r.confidence as number
+  }
+  const regimeStatRows = Object.entries(regimeDist)
+    .map(([regime, s]) => ({
+      regime,
+      count: s.count,
+      avgConf: s.count > 0 ? (s.totalConf / s.count) * 100 : 0,
+      pct: recentHistory.length > 0 ? (s.count / recentHistory.length) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count)
+
+  const mostCommon = regimeStatRows[0]?.regime ?? '—'
+  const totalTransitions = history.length
+
+  // Phase banner config
+  const phaseCfg = {
+    offline: {
+      color: '#64748b', bg: 'rgba(100,116,139,0.07)', border: 'rgba(100,116,139,0.2)',
+      dot: 'bg-[#64748b]', dotAnim: '',
+      title: 'Engine Offline',
+      sub: 'Waiting for shared_state.json — is the trader container running?',
+    },
+    collecting: {
+      color: '#f59e0b', bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.2)',
+      dot: 'bg-[#f59e0b]', dotAnim: 'amber-dot',
+      title: nyseOpen
+        ? `Accumulating Training Data · ${trainBars} / ${trainNeeded} bars`
+        : `Market Closed · ${trainBars} / ${trainNeeded} bars collected`,
+      sub: nyseOpen
+        ? `${remaining} bars remaining · ~${sessionsRemaining.toFixed(1)} session${sessionsRemaining !== 1 ? 's' : ''}`
+        : `HMM will continue collecting at next open · ${countdown} until market opens`,
+    },
+    ready: {
+      color: '#f59e0b', bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.2)',
+      dot: 'bg-[#f59e0b]', dotAnim: 'amber-dot',
+      title: 'Ready to Activate · Awaiting Next Market Open',
+      sub: nyseOpen
+        ? 'HMM will train on the next full session close'
+        : `Training triggers at next open · ${nextOpenStr}`,
+    },
+    trained: {
+      color: '#00ff87', bg: 'rgba(0,255,135,0.06)', border: 'rgba(0,255,135,0.2)',
+      dot: 'bg-[#00ff87]', dotAnim: 'live-dot',
+      title: 'HMM Trained · Live Regime Classification Active',
+      sub: `${Object.keys(regimeInfo).join(', ') || '—'} · retrained every 390 bars · confidence threshold 0.55`,
+    },
+  }[phase]
 
   return (
     <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-5 space-y-4">
@@ -36,44 +151,150 @@ export default function HmmPage() {
         </p>
       </div>
 
-      {/* Training status */}
-      <div
-        className="rounded-xl p-4 border"
-        style={
-          trained
-            ? { background: 'rgba(0,255,135,0.06)', borderColor: 'rgba(0,255,135,0.2)' }
-            : { background: 'rgba(245,158,11,0.06)', borderColor: 'rgba(245,158,11,0.2)' }
-        }
-      >
-        <div className="flex items-center gap-3 mb-2">
-          <span
-            className={clsx('w-2.5 h-2.5 rounded-full', trained ? 'live-dot bg-[#00ff87]' : 'amber-dot bg-[#f59e0b]')}
-          />
-          <span className="font-semibold text-sm" style={{ color: trained ? '#00ff87' : '#f59e0b' }}>
-            {trained
-              ? 'HMM Trained — live regime classification active'
-              : `Accumulating training data: ${trainBars} / ${trainNeeded} bars (${trainPct.toFixed(0)}%)`}
-          </span>
-        </div>
-        {!trained && (
-          <div className="w-full bg-[#1e293b] rounded-full h-1.5 overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${Math.min(trainPct, 100)}%`, background: '#f59e0b' }}
-            />
+      {/* Phase status banner */}
+      <div className="rounded-xl p-4 border" style={{ background: phaseCfg.bg, borderColor: phaseCfg.border }}>
+        <div className="flex items-start gap-3">
+          <span className={clsx('w-2.5 h-2.5 rounded-full shrink-0 mt-0.5', phaseCfg.dot, phaseCfg.dotAnim)} />
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-sm" style={{ color: phaseCfg.color }}>{phaseCfg.title}</p>
+            <p className="text-xs text-[#64748b] mt-0.5">{phaseCfg.sub}</p>
           </div>
-        )}
-        {trained && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs font-mono text-[#64748b]">
-            <div><span className="text-[#475569]">Model</span><br />HMM + LGBM</div>
-            <div><span className="text-[#475569]">Assets</span><br />{Object.keys(regimeInfo).join(', ') || '—'}</div>
-            <div><span className="text-[#475569]">Retrain every</span><br />390 bars (1 session)</div>
-            <div><span className="text-[#475569]">Conf. threshold</span><br />0.55</div>
+          {!nyseOpen && phase !== 'trained' && phase !== 'offline' && (
+            <div className="text-right shrink-0">
+              <p className="text-[10px] text-[#475569] uppercase tracking-widest">Opens in</p>
+              <p className="text-sm font-mono font-semibold text-[#f59e0b] tabular-nums">{countdown}</p>
+            </div>
+          )}
+          {phase === 'trained' && nyseOpen && (
+            <div className="text-right shrink-0">
+              <p className="text-[10px] text-[#475569] uppercase tracking-widest">NYSE</p>
+              <p className="text-sm font-mono font-semibold text-[#00ff87]">OPEN</p>
+            </div>
+          )}
+        </div>
+
+        {/* Progress bar — only when actively collecting */}
+        {(phase === 'collecting' || phase === 'ready') && (
+          <div className="mt-3">
+            <div className="flex justify-between text-[10px] font-mono text-[#475569] mb-1">
+              <span>{trainBars.toLocaleString()} bars collected</span>
+              <span>{trainNeeded.toLocaleString()} needed</span>
+            </div>
+            <div className="w-full bg-[#1e293b] rounded-full h-2 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700 ease-out"
+                style={{
+                  width: `${trainPct}%`,
+                  background: phase === 'ready' ? '#00ff87' : '#f59e0b',
+                }}
+              />
+            </div>
+            {phase === 'ready' && (
+              <p className="text-[10px] font-mono text-[#00ff87] mt-1">
+                ✓ All data collected — HMM ready to train
+              </p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Current regimes */}
+      {/* Training roadmap — only before HMM is trained */}
+      {phase !== 'trained' && phase !== 'offline' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Bar chart: collected vs remaining */}
+          <div className="card p-4">
+            <h3 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium mb-4">
+              Training Progress — Bars
+            </h3>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={roadmapData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+                <XAxis
+                  type="number"
+                  domain={[0, trainNeeded]}
+                  tick={{ fill: '#475569', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="label"
+                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'JetBrains Mono' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={72}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: '#111827', border: '1px solid #1e293b',
+                    borderRadius: '8px', fontSize: '11px', fontFamily: 'JetBrains Mono', color: '#e2e8f0',
+                  }}
+                  formatter={(val: number) => [`${val} bars`, '']}
+                />
+                <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={32}>
+                  {roadmapData.map((entry, i) => (
+                    <Cell key={i} fill={entry.positive ? '#00ff87' : '#334155'} opacity={0.8} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Activation estimate */}
+          <div className="card p-4 flex flex-col justify-between">
+            <h3 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium mb-3">
+              Activation Estimate
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <p className="text-[10px] text-[#475569] uppercase tracking-wider">Status</p>
+                <p className="text-sm font-semibold mt-0.5" style={{ color: phase === 'ready' ? '#00ff87' : '#f59e0b' }}>
+                  {phase === 'ready' ? '✓ Data collection complete' : `${remaining} bars still needed`}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-[#475569] uppercase tracking-wider">
+                  {phase === 'ready' ? 'Trains at next open' : 'Sessions remaining'}
+                </p>
+                <p className="text-sm font-mono font-semibold text-[#e2e8f0] mt-0.5">
+                  {phase === 'ready'
+                    ? nextOpenStr
+                    : `~${Math.ceil(sessionsRemaining)} session${Math.ceil(sessionsRemaining) !== 1 ? 's' : ''}`}
+                </p>
+              </div>
+              {phase !== 'ready' && (
+                <div>
+                  <p className="text-[10px] text-[#475569] uppercase tracking-wider">Est. activation date</p>
+                  <p className="text-sm font-mono text-[#94a3b8] mt-0.5">
+                    {(() => {
+                      const sessionsLeft = Math.ceil(sessionsRemaining)
+                      const d = new Date(now)
+                      let added = 0
+                      while (added < sessionsLeft) {
+                        d.setDate(d.getDate() + 1)
+                        const day = d.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' })
+                        if (day !== 'Saturday' && day !== 'Sunday') added++
+                      }
+                      return d.toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric',
+                        timeZone: 'America/New_York',
+                      })
+                    })()}
+                  </p>
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] text-[#475569] uppercase tracking-wider">Market</p>
+                <p className={clsx('text-sm font-mono font-semibold mt-0.5', nyseOpen ? 'text-[#00ff87]' : 'text-[#475569]')}>
+                  NYSE {nyseOpen ? 'OPEN' : 'CLOSED'} · {market.label} {countdown}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Current regime cards — only once trained */}
       {assets.length > 0 && (
         <div>
           <h2 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium mb-3">
@@ -93,7 +314,7 @@ export default function HmmPage() {
                     <span className="text-2xl font-bold text-[#e2e8f0]">{asset}</span>
                     <span
                       className="px-3 py-1 rounded-lg text-sm font-mono font-bold"
-                      style={{ color: s.text, background: `${s.bg}`, border: `1px solid ${s.border}` }}
+                      style={{ color: s.text, background: s.bg, border: `1px solid ${s.border}` }}
                     >
                       {info.regime.replace('_', ' ')}
                     </span>
@@ -118,6 +339,90 @@ export default function HmmPage() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Confidence trend */}
+      {history.length > 0 && <ConfidenceTrend history={history} />}
+
+      {/* Regime statistics */}
+      {regimeStatRows.length > 0 && (
+        <div className="card p-4">
+          <h3 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium mb-4">
+            Regime Statistics · Last {recentHistory.length} Transitions
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="space-y-0.5">
+              <p className="text-[10px] text-[#475569] uppercase tracking-wider">Total Transitions</p>
+              <p className="text-xl font-semibold font-mono text-[#e2e8f0]">{totalTransitions}</p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-[10px] text-[#475569] uppercase tracking-wider">Most Common</p>
+              <p className="text-sm font-semibold font-mono mt-1" style={{ color: REGIME_FILL[mostCommon] ?? '#64748b' }}>
+                {mostCommon.replace('_', ' ')}
+              </p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-[10px] text-[#475569] uppercase tracking-wider">Regimes Detected</p>
+              <p className="text-xl font-semibold font-mono text-[#e2e8f0]">{regimeStatRows.length}</p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-[10px] text-[#475569] uppercase tracking-wider">Avg Confidence</p>
+              <p className="text-xl font-semibold font-mono text-[#e2e8f0]">
+                {recentHistory.length > 0
+                  ? `${(recentHistory.reduce((s: number, r: { confidence: number }) => s + r.confidence, 0) / recentHistory.length * 100).toFixed(0)}%`
+                  : '—'}
+              </p>
+            </div>
+          </div>
+
+          {/* Per-regime breakdown */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[420px]">
+              <thead>
+                <tr className="text-[10px] text-[#475569] uppercase tracking-widest">
+                  <th className="text-left pb-2 font-medium">Regime</th>
+                  <th className="text-right pb-2 font-medium">Transitions</th>
+                  <th className="text-right pb-2 font-medium">Share</th>
+                  <th className="text-right pb-2 font-medium">Avg Conf</th>
+                  <th className="pl-4 pb-2 font-medium w-32">Distribution</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1e293b]">
+                {regimeStatRows.map((row) => (
+                  <tr key={row.regime}>
+                    <td className="py-2">
+                      <span
+                        className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold"
+                        style={{
+                          color: REGIME_FILL[row.regime] ?? '#64748b',
+                          background: `${REGIME_FILL[row.regime] ?? '#64748b'}18`,
+                          border: `1px solid ${REGIME_FILL[row.regime] ?? '#64748b'}40`,
+                        }}
+                      >
+                        {row.regime.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right font-mono text-[11px] text-[#94a3b8]">{row.count}</td>
+                    <td className="py-2 text-right font-mono text-[11px] text-[#94a3b8]">{row.pct.toFixed(0)}%</td>
+                    <td className="py-2 text-right font-mono text-[11px] text-[#94a3b8]">{row.avgConf.toFixed(0)}%</td>
+                    <td className="py-2 pl-4">
+                      <div className="w-full bg-[#1e293b] rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${row.pct}%`,
+                            background: REGIME_FILL[row.regime] ?? '#64748b',
+                            opacity: 0.75,
+                          }}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -150,7 +455,7 @@ export default function HmmPage() {
         </div>
       </div>
 
-      {/* Regime distribution + history */}
+      {/* Regime distribution + history timeline */}
       <RegimeTimeline history={history} />
     </div>
   )

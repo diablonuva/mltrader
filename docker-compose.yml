@@ -39,15 +39,20 @@ services:
       dockerfile: Dockerfile.dashboard
     container_name: mltrader-dashboard
     env_file: .env
+    user: root                      # required: docker socket access needs root (or docker group)
     environment:
       - NODE_ENV=production
       - LOGS_DIR=/app/logs          # Next.js API routes read shared_state.json from here
       - CONFIG_DIR=/app/config      # Next.js /api/config reads settings.yaml from here
+      - HOST_PROJECT_DIR            # pass-through from .env — host path used by docker compose command
     ports:
       - "8501:3000"                 # external :8501 stays the same — internal Next.js runs on :3000
     volumes:
       - ./logs:/app/logs:ro         # shared with trader — includes shared_state.json and trades.log
       - ./config:/app/config:ro     # read-only config — settings.yaml displayed in Settings page
+      - ./.env:/app/project/.env                              # rw: Live Trading Switch updates ALPACA_BASE_URL
+      - ./docker-compose.yml:/app/project/docker-compose.yml:ro  # for docker compose --force-recreate
+      - /var/run/docker.sock:/var/run/docker.sock             # docker CLI talks to host daemon
     depends_on:
       trader:
         condition: service_started
