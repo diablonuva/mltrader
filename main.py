@@ -186,6 +186,10 @@ class MLTrader:
         self._lgbm_routers: dict[str, LGBMExpertRouter] = {}
         self._retrain_locks: dict[str, threading.Lock] = {}
 
+        self._archive_path: str = os.path.join(
+            config["monitoring"]["log_dir"], "bar_archives.pkl"
+        )
+
         for asset in all_assets:
             ac = AssetClass.from_symbol(asset)
             self._hmm_engines[asset] = HMMEngine(config, asset)
@@ -315,10 +319,19 @@ class MLTrader:
             return
 
         # ----------------------------------------------------------------
-        # HMM inference — skip if model not yet trained
+        # HMM inference — trigger initial training or skip if not yet ready
         # ----------------------------------------------------------------
         hmm = self._hmm_engines[asset]
         if not hmm.is_trained:
+            archive_len = len(self._bar_archives[asset])
+            min_bars = self._config["hmm"].get("min_train_bars", 390)
+            if archive_len >= min_bars:
+                # Enough data — submit initial training to the thread pool.
+                # _retrain_background uses a non-blocking lock so redundant
+                # submissions from subsequent bars are immediately discarded.
+                asyncio.get_event_loop().run_in_executor(
+                    self._executor, self._retrain_background, asset
+                )
             self._last_bar_time[asset] = now
             self._emit_state(now)
             return
@@ -621,6 +634,46 @@ class MLTrader:
             lock.release()
 
     # ------------------------------------------------------------------
+    # Bar-archive persistence
+    # ------------------------------------------------------------------
+
+    def _save_bar_archives(self) -> None:
+        """Write _bar_archives to disk so restarts don't lose training history."""
+        import pickle
+        tmp = self._archive_path + ".tmp"
+        try:
+            os.makedirs(os.path.dirname(self._archive_path) or ".", exist_ok=True)
+            payload = {a: list(dq) for a, dq in self._bar_archives.items()}
+            with open(tmp, "wb") as fh:
+                pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, self._archive_path)
+            total = sum(len(v) for v in payload.values())
+            logger.info(
+                "Bar archives saved: %d bars across %d asset(s) → %s",
+                total, len(payload), self._archive_path,
+            )
+        except Exception:
+            logger.warning("_save_bar_archives failed:\n%s", traceback.format_exc())
+
+    def _load_bar_archives(self) -> None:
+        """Restore _bar_archives from disk on startup."""
+        import pickle
+        if not os.path.exists(self._archive_path):
+            logger.info("No saved bar archives at %s — starting fresh", self._archive_path)
+            return
+        try:
+            with open(self._archive_path, "rb") as fh:
+                payload: dict = pickle.load(fh)
+            for asset, bars in payload.items():
+                if asset in self._bar_archives:
+                    self._bar_archives[asset].extend(bars)
+                    logger.info(
+                        "Bar archive restored: %s — %d bars", asset, len(self._bar_archives[asset])
+                    )
+        except Exception:
+            logger.warning("_load_bar_archives failed:\n%s", traceback.format_exc())
+
+    # ------------------------------------------------------------------
     # Initial model load from disk
     # ------------------------------------------------------------------
 
@@ -683,6 +736,9 @@ class MLTrader:
         for asset in self._assets:
             self._initial_model_load(asset)
 
+        # Restore bar archives so training history survives restarts
+        self._load_bar_archives()
+
         # Subscribe bar callback and start streaming threads
         self._alpaca_client.subscribe_bars(
             symbols=self._assets,
@@ -723,6 +779,10 @@ class MLTrader:
         """Stop streaming, close all positions, flush logs."""
         logger.warning("SHUTDOWN_INITIATED")
         self._running = False
+
+        # Persist bar archives before anything else so a crash-shutdown
+        # doesn't lose the training history collected since last restart.
+        self._save_bar_archives()
 
         if self._alpaca_client is not None:
             try:
