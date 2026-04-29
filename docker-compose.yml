@@ -16,6 +16,7 @@ services:
       - ./src:/app/src:ro           # live-mount source — git pull + restart picks up changes
       - ./config:/app/config:ro    # live-mount config — no rebuild needed for yaml changes
       - ./main.py:/app/main.py:ro  # live-mount entrypoint
+      - ./scripts:/app/scripts:ro  # live-mount maintenance/test scripts (e.g. smoke_test_trade.py)
       - ./logs:/app/logs
       - ./models:/app/models
       - ./data:/app/data
