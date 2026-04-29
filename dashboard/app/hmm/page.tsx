@@ -198,6 +198,70 @@ export default function HmmPage() {
         )}
       </div>
 
+      {/* Feature Engineer Warmup — visible whenever warmup data exists */}
+      {state?.feature_warmup && Object.keys(state.feature_warmup).length > 0 && (
+        <div className="card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium">
+              Feature Engineer Warmup
+            </h3>
+            <span className="text-[10px] text-[#475569]">
+              required before HMM inference can begin
+            </span>
+          </div>
+          <div className="space-y-3">
+            {Object.entries(state.feature_warmup).map(([asset, w]) => {
+              const pct = w.needed > 0 ? Math.min((w.bars / w.needed) * 100, 100) : 100
+              const remaining = Math.max(0, w.needed - w.bars)
+              return (
+                <div key={asset}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-[#e2e8f0]">{asset}</span>
+                      {w.ready ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#00ff87]/10 text-[#00ff87] border border-[#00ff87]/25">
+                          ✓ READY
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#f59e0b]/10 text-[#f59e0b] border border-[#f59e0b]/25">
+                          ⏳ IN PROGRESS
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-mono text-[#64748b] tabular-nums">
+                      {w.bars} / {w.needed} bars ({pct.toFixed(0)}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#1e293b] rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 ease-out"
+                      style={{
+                        width: `${pct}%`,
+                        background: w.ready ? '#00ff87' : '#f59e0b',
+                      }}
+                    />
+                  </div>
+                  {!w.ready && (
+                    <p className="text-[10px] font-mono text-[#475569] mt-1">
+                      {remaining} bar{remaining === 1 ? '' : 's'} remaining · rolling windows fill from streamed bars
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {trained && Object.values(state.feature_warmup).some((w) => !w.ready) && (
+            <div className="rounded-lg p-2 bg-[#1e293b] border border-[#334155]">
+              <p className="text-[10px] text-[#94a3b8] leading-relaxed">
+                <span className="text-[#f59e0b]">Note:</span>{' '}
+                HMM is trained but no trades will fire until warmup completes — inference needs the feature
+                engineer&apos;s rolling windows (vol-ratio, realized-vol, VWAP) to be filled.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Training roadmap — only before HMM is trained */}
       {phase !== 'trained' && phase !== 'offline' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

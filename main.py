@@ -263,6 +263,16 @@ class MLTrader:
         # the dashboard waits for inference output that is itself blocked on
         # the feature engineer's per-session warmup.
         all_hmm_trained = all(self._hmm_engines[a].is_trained for a in self._assets)
+        # Per-asset feature engineer warmup status — surfaced to the dashboard
+        # so the operator can see why inference hasn't started yet.
+        feature_warmup = {
+            a: {
+                "bars": self._feature_engineers[a].bars_in_history,
+                "needed": self._feature_engineers[a].min_history_bars,
+                "ready": self._feature_engineers[a].is_warmed_up,
+            }
+            for a in self._assets
+        }
         self._structured_logger.update_shared_state(
             portfolio_state=self._portfolio_state,
             regime_info=regime_info,
@@ -271,6 +281,7 @@ class MLTrader:
             training_bars=total_archive,
             training_needed=min_train,
             hmm_trained=all_hmm_trained,
+            feature_warmup=feature_warmup,
         )
 
     # ------------------------------------------------------------------

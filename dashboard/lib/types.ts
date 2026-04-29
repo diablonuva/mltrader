@@ -32,6 +32,12 @@ export interface Signal {
   size_pct: number | null
 }
 
+export interface FeatureWarmup {
+  bars: number
+  needed: number
+  ready: boolean
+}
+
 export interface SharedState {
   timestamp: string
   equity: number
@@ -47,6 +53,7 @@ export interface SharedState {
   training_needed: number
   training_pct: number
   hmm_trained: boolean
+  feature_warmup?: Record<string, FeatureWarmup>
 }
 
 export interface Trade {

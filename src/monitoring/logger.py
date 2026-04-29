@@ -311,6 +311,7 @@ class StructuredLogger:
         training_bars: int = 0,
         training_needed: int = 0,
         hmm_trained: Optional[bool] = None,
+        feature_warmup: Optional[dict] = None,
     ) -> None:
         """Write dashboard snapshot JSON to shared_state_path (atomic write)."""
         positions_serialised = {}
@@ -370,6 +371,7 @@ class StructuredLogger:
                 if hmm_trained is not None
                 else any(r.get("regime", "UNKNOWN") != "UNKNOWN" for r in regime_info.values())
             ),
+            "feature_warmup": feature_warmup or {},
         }
 
         # Atomic write: temp file then rename

@@ -223,6 +223,24 @@ class FeatureEngineer:
         if self._or is not None:
             self._or.reset()
 
+    # ------------------------------------------------------------------
+    # Warmup introspection (for dashboard)
+    # ------------------------------------------------------------------
+
+    @property
+    def bars_in_history(self) -> int:
+        """Count of bars currently in the rolling history deque."""
+        return len(self._history)
+
+    @property
+    def min_history_bars(self) -> int:
+        """Bars required before compute_features() returns non-None."""
+        return self._vol_ratio_long
+
+    @property
+    def is_warmed_up(self) -> bool:
+        return len(self._history) >= self._vol_ratio_long
+
 
 # ---------------------------------------------------------------------------
 # Standalone helper
