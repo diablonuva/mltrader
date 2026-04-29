@@ -241,6 +241,24 @@ class FeatureEngineer:
     def is_warmed_up(self) -> bool:
         return len(self._history) >= self._vol_ratio_long
 
+    # ------------------------------------------------------------------
+    # Persistence: save/restore the rolling history across restarts
+    # ------------------------------------------------------------------
+
+    def get_history(self) -> list[BarData]:
+        """Return a snapshot of the rolling bar history (for pickling)."""
+        return list(self._history)
+
+    def restore_history(self, bars: list[BarData]) -> None:
+        """Repopulate the rolling history from a saved snapshot.
+
+        Only the deque is restored — VWAP and OR trackers stay session-scoped
+        and reset on the next session boundary.
+        """
+        self._history.clear()
+        for bar in bars:
+            self._history.append(bar)
+
 
 # ---------------------------------------------------------------------------
 # Standalone helper

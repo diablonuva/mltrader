@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
+import BottomNav from './BottomNav'
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -39,8 +40,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        {/* pb-20 reserves space on mobile for the fixed BottomNav (h-16 + safe-area) */}
+        <main className="flex-1 overflow-y-auto pb-20 lg:pb-0">{children}</main>
       </div>
+
+      {/* Bottom navigation — visible only below lg breakpoint */}
+      <BottomNav />
     </div>
   )
 }

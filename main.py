@@ -189,6 +189,9 @@ class MLTrader:
         self._archive_path: str = os.path.join(
             config["monitoring"]["log_dir"], "bar_archives.pkl"
         )
+        self._feature_history_path: str = os.path.join(
+            config["monitoring"]["log_dir"], "feature_history.pkl"
+        )
 
         for asset in all_assets:
             ac = AssetClass.from_symbol(asset)
@@ -705,6 +708,53 @@ class MLTrader:
             logger.warning("_load_bar_archives failed:\n%s", traceback.format_exc())
 
     # ------------------------------------------------------------------
+    # Feature engineer history persistence
+    # ------------------------------------------------------------------
+
+    def _save_feature_history(self) -> None:
+        """Persist each FeatureEngineer's rolling bar window so warmup
+        survives container restarts."""
+        import pickle
+        tmp = self._feature_history_path + ".tmp"
+        try:
+            os.makedirs(os.path.dirname(self._feature_history_path) or ".", exist_ok=True)
+            payload = {a: fe.get_history() for a, fe in self._feature_engineers.items()}
+            with open(tmp, "wb") as fh:
+                pickle.dump(payload, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, self._feature_history_path)
+            total = sum(len(v) for v in payload.values())
+            logger.info(
+                "Feature history saved: %d bars across %d asset(s) → %s",
+                total, len(payload), self._feature_history_path,
+            )
+        except Exception:
+            logger.warning("_save_feature_history failed:\n%s", traceback.format_exc())
+
+    def _load_feature_history(self) -> None:
+        """Restore each FeatureEngineer's rolling bar window from disk."""
+        import pickle
+        if not os.path.exists(self._feature_history_path):
+            logger.info(
+                "No saved feature history at %s — warmup starts fresh",
+                self._feature_history_path,
+            )
+            return
+        try:
+            with open(self._feature_history_path, "rb") as fh:
+                payload: dict = pickle.load(fh)
+            for asset, bars in payload.items():
+                if asset in self._feature_engineers:
+                    self._feature_engineers[asset].restore_history(bars)
+                    logger.info(
+                        "Feature history restored: %s — %d bars (warmup needs %d)",
+                        asset,
+                        self._feature_engineers[asset].bars_in_history,
+                        self._feature_engineers[asset].min_history_bars,
+                    )
+        except Exception:
+            logger.warning("_load_feature_history failed:\n%s", traceback.format_exc())
+
+    # ------------------------------------------------------------------
     # Initial model load from disk
     # ------------------------------------------------------------------
 
@@ -769,6 +819,8 @@ class MLTrader:
 
         # Restore bar archives so training history survives restarts
         self._load_bar_archives()
+        # Restore feature engineer rolling windows so warmup survives restarts
+        self._load_feature_history()
 
         # Subscribe bar callback and start streaming threads
         self._alpaca_client.subscribe_bars(
@@ -814,6 +866,8 @@ class MLTrader:
         # Persist bar archives before anything else so a crash-shutdown
         # doesn't lose the training history collected since last restart.
         self._save_bar_archives()
+        # Persist feature engineer rolling windows so warmup is not lost
+        self._save_feature_history()
 
         if self._alpaca_client is not None:
             try:
