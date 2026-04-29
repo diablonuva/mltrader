@@ -308,30 +308,35 @@ class MLTrader:
         self._bar_archives[asset].append(bar)  # cross-session archive for retraining
 
         # ----------------------------------------------------------------
-        # Feature computation
+        # Feature engineer update — must happen on every bar (including
+        # pre-training) so rolling windows accumulate continuously.
         # ----------------------------------------------------------------
         self._feature_engineers[asset].update(bar)
         bars_since_open = self._session_manager.get_bars_since_open(asset)
         raw_features = self._feature_engineers[asset].compute_features(bars_since_open)
-        if raw_features is None:
-            self._last_bar_time[asset] = now
-            self._emit_state(now)
-            return
 
         # ----------------------------------------------------------------
-        # HMM inference — trigger initial training or skip if not yet ready
+        # HMM training trigger — checked BEFORE the raw_features early-return
+        # so initial training can fire even while the per-session feature
+        # engineer is still warming up. Training uses the historical bar
+        # archive, not the current bar's computed features.
         # ----------------------------------------------------------------
         hmm = self._hmm_engines[asset]
         if not hmm.is_trained:
             archive_len = len(self._bar_archives[asset])
             min_bars = self._config["hmm"].get("min_train_bars", 390)
             if archive_len >= min_bars:
-                # Enough data — submit initial training to the thread pool.
                 # _retrain_background uses a non-blocking lock so redundant
                 # submissions from subsequent bars are immediately discarded.
                 asyncio.get_event_loop().run_in_executor(
                     self._executor, self._retrain_background, asset
                 )
+            self._last_bar_time[asset] = now
+            self._emit_state(now)
+            return
+
+        # Once trained, we need raw_features to feed HMM inference
+        if raw_features is None:
             self._last_bar_time[asset] = now
             self._emit_state(now)
             return
