@@ -328,6 +328,16 @@ class MLTrader:
         self._bar_archives[asset].append(bar)  # cross-session archive for retraining
 
         # ----------------------------------------------------------------
+        # Refresh portfolio state from Alpaca on every bar so the dashboard
+        # reflects real-time equity / cash / positions — including externally
+        # placed orders (e.g. smoke-test trades). One API call per bar is
+        # well within Alpaca's 200 req/min paper rate limit.
+        # ----------------------------------------------------------------
+        refreshed = self._refresh_portfolio_state()
+        if refreshed is not None:
+            self._portfolio_state = refreshed
+
+        # ----------------------------------------------------------------
         # Feature engineer update — must happen on every bar (including
         # pre-training) so rolling windows accumulate continuously.
         # ----------------------------------------------------------------
