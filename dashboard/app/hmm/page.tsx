@@ -6,6 +6,7 @@ import type { SharedState } from '@/lib/types'
 import RegimeTimeline from '@/components/RegimeTimeline'
 import ConfidenceTrend from '@/components/ConfidenceTrend'
 import { isNyseOpen, nextMarketEvent, formatCountdown } from '@/lib/format'
+import { normalizeRegime, regimeLabel } from '@/lib/regime'
 import clsx from 'clsx'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -91,7 +92,7 @@ export default function HmmPage() {
   const recentHistory = history.slice(-200)
   const regimeDist: Record<string, { count: number; totalConf: number }> = {}
   for (const r of recentHistory) {
-    const k = r.new_regime as string
+    const k = normalizeRegime(r.new_regime as string)
     if (!regimeDist[k]) regimeDist[k] = { count: 0, totalConf: 0 }
     regimeDist[k].count++
     regimeDist[k].totalConf += r.confidence as number
@@ -421,10 +422,14 @@ export default function HmmPage() {
               <p className="text-[10px] text-[#475569] uppercase tracking-wider">Total Transitions</p>
               <p className="text-xl font-semibold font-mono text-[#e2e8f0]">{totalTransitions}</p>
             </div>
-            <div className="space-y-0.5">
+            <div className="space-y-0.5 min-w-0">
               <p className="text-[10px] text-[#475569] uppercase tracking-wider">Most Common</p>
-              <p className="text-sm font-semibold font-mono mt-1" style={{ color: REGIME_FILL[mostCommon] ?? '#64748b' }}>
-                {mostCommon.replace('_', ' ')}
+              <p
+                className="text-sm font-semibold font-mono mt-1 truncate"
+                style={{ color: REGIME_FILL[mostCommon] ?? '#64748b' }}
+                title={regimeLabel(mostCommon)}
+              >
+                {regimeLabel(mostCommon)}
               </p>
             </div>
             <div className="space-y-0.5">
@@ -441,50 +446,49 @@ export default function HmmPage() {
             </div>
           </div>
 
-          {/* Per-regime breakdown */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[420px]">
+          {/* Per-regime breakdown — horizontal scroll on narrow screens */}
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <table className="w-full text-sm min-w-[420px] sm:min-w-0">
               <thead>
                 <tr className="text-[10px] text-[#475569] uppercase tracking-widest">
-                  <th className="text-left pb-2 font-medium">Regime</th>
-                  <th className="text-right pb-2 font-medium">Transitions</th>
+                  <th className="text-left pb-2 pl-4 sm:pl-0 font-medium">Regime</th>
+                  <th className="text-right pb-2 font-medium">Trans.</th>
                   <th className="text-right pb-2 font-medium">Share</th>
                   <th className="text-right pb-2 font-medium">Avg Conf</th>
-                  <th className="pl-4 pb-2 font-medium w-32">Distribution</th>
+                  <th className="pl-3 pb-2 pr-4 sm:pr-0 font-medium hidden sm:table-cell w-32">Distribution</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e293b]">
-                {regimeStatRows.map((row) => (
-                  <tr key={row.regime}>
-                    <td className="py-2">
-                      <span
-                        className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold"
-                        style={{
-                          color: REGIME_FILL[row.regime] ?? '#64748b',
-                          background: `${REGIME_FILL[row.regime] ?? '#64748b'}18`,
-                          border: `1px solid ${REGIME_FILL[row.regime] ?? '#64748b'}40`,
-                        }}
-                      >
-                        {row.regime.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="py-2 text-right font-mono text-[11px] text-[#94a3b8]">{row.count}</td>
-                    <td className="py-2 text-right font-mono text-[11px] text-[#94a3b8]">{row.pct.toFixed(0)}%</td>
-                    <td className="py-2 text-right font-mono text-[11px] text-[#94a3b8]">{row.avgConf.toFixed(0)}%</td>
-                    <td className="py-2 pl-4">
-                      <div className="w-full bg-[#1e293b] rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
+                {regimeStatRows.map((row) => {
+                  const color = REGIME_FILL[row.regime] ?? '#64748b'
+                  return (
+                    <tr key={row.regime}>
+                      <td className="py-2 pl-4 sm:pl-0">
+                        <span
+                          className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap"
                           style={{
-                            width: `${row.pct}%`,
-                            background: REGIME_FILL[row.regime] ?? '#64748b',
-                            opacity: 0.75,
+                            color,
+                            background: `${color}18`,
+                            border: `1px solid ${color}40`,
                           }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        >
+                          {regimeLabel(row.regime)}
+                        </span>
+                      </td>
+                      <td className="py-2 text-right font-mono text-[10px] text-[#94a3b8]">{row.count}</td>
+                      <td className="py-2 text-right font-mono text-[10px] text-[#94a3b8]">{row.pct.toFixed(0)}%</td>
+                      <td className="py-2 text-right font-mono text-[10px] text-[#94a3b8] pr-4 sm:pr-0">{row.avgConf.toFixed(0)}%</td>
+                      <td className="py-2 pl-3 hidden sm:table-cell">
+                        <div className="w-full bg-[#1e293b] rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${row.pct}%`, background: color, opacity: 0.75 }}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

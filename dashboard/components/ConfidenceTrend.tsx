@@ -4,6 +4,7 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Cell,
 } from 'recharts'
+import { normalizeRegime, regimeLabel, REGIME_COLOR } from '@/lib/regime'
 
 interface RegimeChange {
   ts: string
@@ -16,14 +17,7 @@ interface Props {
   history: RegimeChange[]
 }
 
-const REGIME_FILL: Record<string, string> = {
-  TRENDING_UP:   '#00ff87',
-  TRENDING_DOWN: '#ff4d6d',
-  BREAKOUT:      '#60a5fa',
-  SQUEEZE:       '#fbbf24',
-  CHOPPY:        '#f97316',
-  UNKNOWN:       '#64748b',
-}
+const REGIME_FILL = REGIME_COLOR
 
 export default function ConfidenceTrend({ history }: Props) {
   if (history.length === 0) {
@@ -37,7 +31,7 @@ export default function ConfidenceTrend({ history }: Props) {
   const data = history.slice(-60).map((r, i) => ({
     i,
     confidence: Math.round(r.confidence * 100),
-    regime: r.new_regime,
+    regime: normalizeRegime(r.new_regime),
     label: new Date(r.ts).toLocaleString('en-US', {
       month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
@@ -73,7 +67,7 @@ export default function ConfidenceTrend({ history }: Props) {
               borderRadius: '8px', fontSize: '11px', fontFamily: 'JetBrains Mono', color: '#e2e8f0',
             }}
             formatter={(val: number, _: string, props: { payload?: { regime?: string; label?: string } }) => [
-              `${val}% confidence · ${(props.payload?.regime ?? '').replace('_', ' ')}`,
+              `${val}% confidence · ${regimeLabel(props.payload?.regime)}`,
               props.payload?.label ?? '',
             ]}
             labelFormatter={() => ''}
@@ -97,7 +91,7 @@ export default function ConfidenceTrend({ history }: Props) {
         {Object.entries(REGIME_FILL).filter(([k]) => k !== 'UNKNOWN').map(([regime, color]) => (
           <span key={regime} className="flex items-center gap-1 text-[10px] font-mono text-[#475569]">
             <span className="w-2 h-2 rounded-sm inline-block" style={{ background: color }} />
-            {regime.replace('_', ' ')}
+            {regimeLabel(regime)}
           </span>
         ))}
       </div>

@@ -1,7 +1,7 @@
 'use client'
 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import clsx from 'clsx'
+import { normalizeRegime, regimeLabel, REGIME_COLOR } from '@/lib/regime'
 
 interface RegimeChange {
   ts: string
@@ -16,37 +16,39 @@ interface Props {
   history: RegimeChange[]
 }
 
-const REGIME_STYLE: Record<string, { text: string; bg: string; border: string; fill: string }> = {
-  TRENDING_UP:   { text: '#00ff87', bg: 'rgba(0,255,135,0.08)',   border: 'rgba(0,255,135,0.25)',  fill: '#00ff87' },
-  TRENDING_DOWN: { text: '#ff4d6d', bg: 'rgba(255,77,109,0.08)',  border: 'rgba(255,77,109,0.25)', fill: '#ff4d6d' },
-  BREAKOUT:      { text: '#60a5fa', bg: 'rgba(96,165,250,0.08)',  border: 'rgba(96,165,250,0.25)', fill: '#60a5fa' },
-  SQUEEZE:       { text: '#fbbf24', bg: 'rgba(251,191,36,0.08)',  border: 'rgba(251,191,36,0.25)', fill: '#fbbf24' },
-  CHOPPY:        { text: '#f97316', bg: 'rgba(249,115,22,0.08)',  border: 'rgba(249,115,22,0.25)', fill: '#f97316' },
-  UNKNOWN:       { text: '#64748b', bg: 'rgba(100,116,139,0.08)', border: 'rgba(100,116,139,0.2)', fill: '#64748b' },
+const REGIME_BG: Record<string, string> = {
+  TRENDING_UP:   'rgba(0,255,135,0.10)',
+  TRENDING_DOWN: 'rgba(255,77,109,0.10)',
+  BREAKOUT:      'rgba(96,165,250,0.10)',
+  SQUEEZE:       'rgba(251,191,36,0.10)',
+  CHOPPY:        'rgba(249,115,22,0.10)',
+  UNKNOWN:       'rgba(100,116,139,0.10)',
 }
 
 function RegimeBadge({ regime }: { regime: string }) {
-  const s = REGIME_STYLE[regime] ?? REGIME_STYLE.UNKNOWN
+  const key = normalizeRegime(regime)
+  const color = REGIME_COLOR[key] ?? REGIME_COLOR.UNKNOWN
+  const bg    = REGIME_BG[key]    ?? REGIME_BG.UNKNOWN
   return (
     <span
-      className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold whitespace-nowrap"
-      style={{ background: s.bg, color: s.text, border: `1px solid ${s.border}` }}
+      className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap"
+      style={{ background: bg, color, border: `1px solid ${color}40` }}
     >
-      {regime.replace('_', ' ')}
+      {regimeLabel(regime)}
     </span>
   )
 }
 
 export default function RegimeTimeline({ history }: Props) {
-  // Distribution from recent history (last 200 entries)
+  // Distribution from recent history (last 200 entries) — normalize keys first
   const recent = history.slice(-200)
   const dist: Record<string, number> = {}
   for (const r of recent) {
-    const k = r.new_regime
+    const k = normalizeRegime(r.new_regime)
     dist[k] = (dist[k] || 0) + 1
   }
   const pieData = Object.entries(dist)
-    .map(([name, value]) => ({ name, value }))
+    .map(([key, value]) => ({ key, name: key.replace(/_/g, ' '), value }))
     .sort((a, b) => b.value - a.value)
 
   const sorted = [...history].reverse().slice(0, 50)
@@ -59,47 +61,56 @@ export default function RegimeTimeline({ history }: Props) {
           <h3 className="text-[10px] text-[#475569] uppercase tracking-widest font-medium mb-3">
             Regime Distribution (last {recent.length} transitions)
           </h3>
-          <div className="flex items-center gap-4">
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {pieData.map((entry) => (
-                    <Cell
-                      key={entry.name}
-                      fill={(REGIME_STYLE[entry.name] ?? REGIME_STYLE.UNKNOWN).fill}
-                      opacity={0.85}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    background: '#111827', border: '1px solid #1e293b',
-                    borderRadius: '8px', fontSize: '12px', fontFamily: 'JetBrains Mono',
-                    color: '#e2e8f0',
-                  }}
-                  formatter={(val: number, name: string) => [
-                    `${val} transitions (${((val / recent.length) * 100).toFixed(0)}%)`,
-                    name.replace('_', ' '),
-                  ]}
-                />
-                <Legend
-                  formatter={(val) => (
-                    <span style={{ color: (REGIME_STYLE[val] ?? REGIME_STYLE.UNKNOWN).text, fontSize: 11 }}>
-                      {val.replace('_', ' ')}
+          {/* Smaller height on mobile, larger on desktop */}
+          <ResponsiveContainer width="100%" height={140}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                innerRadius={36}
+                outerRadius={62}
+                paddingAngle={2}
+                dataKey="value"
+                stroke="none"
+              >
+                {pieData.map((entry) => (
+                  <Cell
+                    key={entry.key}
+                    fill={REGIME_COLOR[entry.key] ?? REGIME_COLOR.UNKNOWN}
+                    opacity={0.9}
+                  />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{
+                  background: '#111827', border: '1px solid #1e293b',
+                  borderRadius: '8px', fontSize: '11px', fontFamily: 'JetBrains Mono',
+                  color: '#e2e8f0', padding: '6px 10px',
+                }}
+                formatter={(val: number, name: string) => [
+                  `${val} transitions (${((val / recent.length) * 100).toFixed(0)}%)`,
+                  name,
+                ]}
+              />
+              <Legend
+                wrapperStyle={{ fontSize: 10, paddingTop: 4 }}
+                iconSize={8}
+                formatter={(val: string, entry) => {
+                  const key = (entry?.payload as { key?: string } | undefined)?.key ?? val
+                  return (
+                    <span style={{
+                      color: REGIME_COLOR[key] ?? REGIME_COLOR.UNKNOWN,
+                      fontSize: 10,
+                      fontFamily: 'JetBrains Mono',
+                    }}>
+                      {val}
                     </span>
-                  )}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+                  )
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
       )}
 
@@ -111,31 +122,31 @@ export default function RegimeTimeline({ history }: Props) {
         {sorted.length === 0 ? (
           <p className="text-[#475569] text-sm">No regime changes recorded</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[540px]">
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <table className="w-full text-sm min-w-[480px] sm:min-w-0">
               <thead>
                 <tr className="text-[10px] text-[#475569] uppercase tracking-widest">
-                  <th className="text-left pb-2 font-medium">Time (ET)</th>
+                  <th className="text-left pb-2 pl-4 sm:pl-0 font-medium">Time (ET)</th>
                   <th className="text-left pb-2 font-medium">Asset</th>
                   <th className="text-left pb-2 font-medium">From</th>
                   <th className="text-left pb-2 font-medium">To</th>
-                  <th className="text-right pb-2 font-medium">Confidence</th>
+                  <th className="text-right pb-2 pr-4 sm:pr-0 font-medium">Conf</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e293b]">
                 {sorted.map((r, i) => (
                   <tr key={i}>
-                    <td className="py-2 font-mono text-[11px] text-[#475569]">
+                    <td className="py-2 pl-4 sm:pl-0 font-mono text-[10px] text-[#475569] whitespace-nowrap">
                       {new Date(r.ts).toLocaleString('en-US', {
                         month: 'short', day: 'numeric',
                         hour: '2-digit', minute: '2-digit',
                         hour12: false, timeZone: 'America/New_York',
                       })}
                     </td>
-                    <td className="py-2 font-semibold text-[#e2e8f0]">{r.asset}</td>
+                    <td className="py-2 font-semibold text-xs text-[#e2e8f0]">{r.asset}</td>
                     <td className="py-2"><RegimeBadge regime={r.old_regime} /></td>
                     <td className="py-2"><RegimeBadge regime={r.new_regime} /></td>
-                    <td className="py-2 text-right font-mono text-[11px] text-[#64748b]">
+                    <td className="py-2 pr-4 sm:pr-0 text-right font-mono text-[10px] text-[#64748b]">
                       {(r.confidence * 100).toFixed(0)}%
                     </td>
                   </tr>

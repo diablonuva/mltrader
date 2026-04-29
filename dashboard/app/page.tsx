@@ -10,6 +10,7 @@ import EquityCurve from '@/components/EquityCurve'
 import RegimePanel from '@/components/RegimePanel'
 import PositionsTable from '@/components/PositionsTable'
 import TradeHistory from '@/components/TradeHistory'
+import GateIndicators from '@/components/GateIndicators'
 
 // lightweight-charts must only run client-side
 const CandlestickChart = dynamic(
@@ -78,6 +79,10 @@ export default function Dashboard() {
           </span>
         </div>
       )}
+
+      {/* Trade entry gate indicators — above KPIs so the operator can see at a
+          glance which conditions are blocking the next trade */}
+      <GateIndicators state={state} />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">

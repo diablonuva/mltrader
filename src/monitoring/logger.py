@@ -169,19 +169,23 @@ class StructuredLogger:
         confidence: float,
         timestamp: datetime,
     ) -> None:
+        # Use .value when given an enum so regime.log stores plain strings
+        # like "TRENDING_UP" rather than "RegimeLabel.TRENDING_UP".
+        old_str = old_regime.value if hasattr(old_regime, "value") else str(old_regime)
+        new_str = new_regime.value if hasattr(new_regime, "value") else str(new_regime)
         record = {
             "event": "REGIME_CHANGE",
             "ts": _now_iso(),
             "asset": asset,
-            "old_regime": str(old_regime),
-            "new_regime": str(new_regime),
+            "old_regime": old_str,
+            "new_regime": new_str,
             "confidence": round(confidence, 4),
             "bar_timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp),
         }
         _write(self._regime_fh, record)
         logger.info(
             "REGIME  %s  %s → %s  conf=%.3f",
-            asset, old_regime, new_regime, confidence,
+            asset, old_str, new_str, confidence,
         )
 
     # ------------------------------------------------------------------

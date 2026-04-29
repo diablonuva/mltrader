@@ -43,6 +43,13 @@ body {
 }
 .amber-dot { animation: amber-pulse 2s ease-in-out infinite; }
 
+/* Red pulse for failed-gate dot */
+@keyframes red-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 5px #ff4d6d; }
+  50%       { opacity: 0.5; box-shadow: 0 0 1px #ff4d6d; }
+}
+.red-dot { animation: red-pulse 2.4s ease-in-out infinite; }
+
 /* Row hover in tables */
 tbody tr { transition: background-color 0.15s ease; }
 tbody tr:hover { background-color: rgba(26, 34, 54, 0.6); }
