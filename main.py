@@ -258,6 +258,11 @@ class MLTrader:
         min_train = self._config["hmm"].get("min_train_bars", 390)
         archive_sizes = {a: len(self._bar_archives.get(a, [])) for a in self._assets}
         total_archive = sum(archive_sizes.values())
+        # Source-of-truth: HMM is trained when every asset's engine has been
+        # fitted. Reading is_trained directly avoids the chicken-and-egg where
+        # the dashboard waits for inference output that is itself blocked on
+        # the feature engineer's per-session warmup.
+        all_hmm_trained = all(self._hmm_engines[a].is_trained for a in self._assets)
         self._structured_logger.update_shared_state(
             portfolio_state=self._portfolio_state,
             regime_info=regime_info,
@@ -265,6 +270,7 @@ class MLTrader:
             equity_curve=self._equity_curve,
             training_bars=total_archive,
             training_needed=min_train,
+            hmm_trained=all_hmm_trained,
         )
 
     # ------------------------------------------------------------------
