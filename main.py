@@ -595,8 +595,17 @@ class MLTrader:
                 end_timestamp=bars[-1].timestamp,
             )
 
-            # Viterbi regime labels for LGBM supervision
-            regime_labels = new_hmm.predict_regime_filtered(feature_matrix)
+            # MAP regime labels for LGBM supervision.
+            # predict_regime_filtered returns alpha of shape (T, n_states) — a
+            # probability matrix. Argmax gives the most likely state per bar,
+            # which we map through RegimeLabel.from_index to get enum labels.
+            alpha = new_hmm.predict_regime_filtered(feature_matrix)
+            state_indices = alpha.argmax(axis=1)
+            n_states = new_hmm.model.n_components
+            regime_labels = np.array(
+                [RegimeLabel.from_index(int(i), n_states) for i in state_indices],
+                dtype=object,
+            )
             scaled_features = new_hmm.scaler.transform(feature_matrix)
             close_prices = np.array(
                 [b.close for b in bars[-len(feature_matrix):]], dtype=float
