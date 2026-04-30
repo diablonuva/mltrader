@@ -406,11 +406,20 @@ PY
 )
 echo -e "  ${COL_DIM}↳ next scheduled email: $next_eod${COL_RESET}"
 
-# Verify EOD scheduler task is running inside the trader (look for log line)
-if docker compose logs trader --since 24h 2>&1 | grep -q "EOD scheduler started"; then
-  pass "EOD scheduler started log line found" "safety net is active"
-else
-  warn "no 'EOD scheduler started' log line in last 24h" "may need a trader restart to activate the new safety net"
+# Verify EOD scheduler task is running inside the trader.
+# Use multiple log windows because `--since 24h` has been observed to return
+# nothing intermittently on Pi/compose-v2; fall back to longer windows if
+# the smallest doesn't catch a recent restart.
+sched_found=false
+for window in 30m 2h 12h 7d; do
+  if docker compose logs trader --since "$window" 2>&1 | grep -q "EOD scheduler started"; then
+    pass "EOD scheduler started log line found" "safety net is active (matched in last $window)"
+    sched_found=true
+    break
+  fi
+done
+if [[ "$sched_found" != "true" ]]; then
+  warn "no 'EOD scheduler started' log line found in any window" "may need a trader restart to activate the new safety net"
 fi
 
 # ── 9. AUTONOMY / SURVIVABILITY ────────────────────────────────────────────
