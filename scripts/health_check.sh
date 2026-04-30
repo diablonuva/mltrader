@@ -85,7 +85,8 @@ section "3. Configuration"
 
 if [[ ! -f .env ]]; then fail ".env missing"; else
   pass ".env present"
-  for k in ALPACA_API_KEY ALPACA_SECRET_KEY ALPACA_BASE_URL ASSETS HOST_PROJECT_DIR; do
+  # Required (FAIL if missing)
+  for k in ALPACA_API_KEY ALPACA_SECRET_KEY ALPACA_BASE_URL HOST_PROJECT_DIR; do
     if grep -qE "^${k}=" .env; then
       val=$(grep -E "^${k}=" .env | head -1 | cut -d= -f2-)
       if [[ -z "$val" ]]; then fail "  $k is empty"
@@ -98,6 +99,12 @@ if [[ ! -f .env ]]; then fail ".env missing"; else
       fail "  $k missing from .env"
     fi
   done
+  # Optional (only used by dashboard /api/meta; defaults to 'SPY')
+  if grep -qE "^ASSETS=" .env; then
+    pass "  ASSETS = $(grep -E "^ASSETS=" .env | head -1 | cut -d= -f2-)"
+  else
+    pass "  ASSETS unset" "dashboard defaults to 'SPY' — trader reads asset list from settings.yaml"
+  fi
 
   base_url=$(grep -E "^ALPACA_BASE_URL=" .env | head -1 | cut -d= -f2-)
   if [[ "$base_url" == *paper* ]]; then
@@ -128,20 +135,38 @@ fi
 section "4. Persistence files"
 
 check_file() {
-  local path=$1 label=$2 max_age_s=${3:-0}
+  local path=$1 label=$2 max_age_s=${3:-0} only_when_open=${4:-false}
   if [[ ! -f "$path" ]]; then fail "$label missing" "$path"; return; fi
   local size=$(stat -c %s "$path" 2>/dev/null || echo 0)
   local mtime=$(stat -c %Y "$path" 2>/dev/null || echo 0)
   local now=$(date +%s)
   local age=$((now - mtime))
   if [[ "$max_age_s" -gt 0 && "$age" -gt "$max_age_s" ]]; then
-    warn "$label stale" "${age}s old (limit ${max_age_s}s) · ${size} bytes"
+    if [[ "$only_when_open" == "true" ]] && ! is_market_open; then
+      pass "$label" "${size} bytes · ${age}s old (market closed — staleness expected)"
+    else
+      warn "$label stale" "${age}s old (limit ${max_age_s}s) · ${size} bytes"
+    fi
   else
     pass "$label" "${size} bytes · ${age}s old"
   fi
 }
 
-check_file logs/shared_state.json     "shared_state.json"   90
+# True iff NYSE is currently open (weekday 09:30-16:00 ET)
+is_market_open() {
+  python3 - <<'PY' 2>/dev/null
+from datetime import datetime, timezone, timedelta
+et = datetime.now(timezone.utc) - timedelta(hours=4)
+open_secs  = 9*3600 + 30*60
+close_secs = 16*3600
+secs = et.hour*3600 + et.minute*60 + et.second
+import sys
+sys.exit(0 if (et.weekday() < 5 and open_secs <= secs < close_secs) else 1)
+PY
+}
+
+# Only flag shared_state stale if markets are open (no bars when closed)
+check_file logs/shared_state.json     "shared_state.json"   90 true
 check_file logs/bar_archives.pkl      "bar_archives.pkl"
 check_file logs/feature_history.pkl   "feature_history.pkl"
 
@@ -150,10 +175,22 @@ ls models/*_hmm.pkl >/dev/null 2>&1 \
   && pass "HMM model(s) present" "$(ls models/*_hmm.pkl | xargs -n1 basename | tr '\n' ' ')" \
   || warn "no HMM model in models/" "first retrain hasn't completed"
 
-# Log files writability
+# Log files writable BY THE TRADER (which runs as root in the container).
+# Checking [[ -w ]] from the host as user diablo gives false negatives, so
+# we ask the container directly and additionally verify the dir is writable.
+if docker exec mltrader-engine test -w /app/logs 2>/dev/null; then
+  pass "/app/logs writable by trader container" "(root inside container)"
+else
+  fail "/app/logs not writable by trader container"
+fi
 for log in logs/app.log logs/trades.log logs/orders.log logs/regime.log logs/session.log logs/pnl.log; do
   if [[ -f "$log" ]]; then
-    [[ -w "$log" ]] && pass "$(basename $log) writable" "$(stat -c %s $log) bytes" || fail "$(basename $log) not writable"
+    fname=$(basename "$log")
+    if docker exec mltrader-engine test -w "/app/logs/$fname" 2>/dev/null; then
+      pass "$fname writable" "$(stat -c %s $log) bytes"
+    else
+      fail "$fname not writable inside container"
+    fi
   fi
 done
 
@@ -271,10 +308,11 @@ mode=$(curl -s http://localhost:8501/api/meta 2>/dev/null | python3 -c "import j
 # ── 8. AUTONOMY / SURVIVABILITY ────────────────────────────────────────────
 section "8. Autonomy & survivability"
 
-# Log rotation configured?
-log_max=$(docker inspect mltrader-engine --format '{{.HostConfig.LogConfig.Config.max-size}}' 2>/dev/null)
-log_files=$(docker inspect mltrader-engine --format '{{.HostConfig.LogConfig.Config.max-file}}' 2>/dev/null)
-if [[ -n "$log_max" && "$log_max" != "<no value>" ]]; then
+# Log rotation configured? Use {{index ... "key"}} because Go templates
+# parse "max-size" as subtraction with the dotted notation.
+log_max=$(docker inspect mltrader-engine --format '{{index .HostConfig.LogConfig.Config "max-size"}}' 2>/dev/null)
+log_files=$(docker inspect mltrader-engine --format '{{index .HostConfig.LogConfig.Config "max-file"}}' 2>/dev/null)
+if [[ -n "$log_max" && "$log_max" != "<no value>" && "$log_max" != "0" ]]; then
   pass "trader log rotation" "max ${log_max} × ${log_files} files"
 else
   warn "trader log rotation not configured" "logs may grow unbounded"
