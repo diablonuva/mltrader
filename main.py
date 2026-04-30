@@ -815,6 +815,60 @@ class MLTrader:
             "uptime":                 uptime,
         }
 
+    async def _eod_catchup_if_needed(self) -> None:
+        """If we're starting AFTER 16:05 ET on a trading day and today's
+        emails haven't gone out, fire them now.
+
+        Without this, a trader restart between 16:00 and 16:05 (or any later
+        restart on the same day before the next session) would skip today's
+        EOD reports until tomorrow's safety-net wake-up.
+        """
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        # Only catchup on weekdays past 16:05 ET
+        if et_now.weekday() >= 5:
+            return
+        checkpoint = et_now.replace(hour=16, minute=5, second=0, microsecond=0)
+        if et_now < checkpoint:
+            logger.info(
+                "EOD catchup: skipped — current ET %s is before today's 16:05 checkpoint",
+                et_now.strftime("%H:%M:%S"),
+            )
+            return
+
+        today = datetime.now(timezone.utc).date()
+        daily_done   = self._reporter.was_daily_sent_today(today)
+        weekly_due   = today.weekday() == 4
+        weekly_done  = (not weekly_due) or self._reporter.was_weekly_sent_for_isoweek(today)
+        monthly_due  = _is_last_trading_day_of_month_safe(today)
+        monthly_done = (not monthly_due) or self._reporter.was_monthly_sent_for_month(today)
+
+        if daily_done and weekly_done and monthly_done:
+            logger.info("EOD catchup: all due reports already sent — nothing to do")
+            return
+
+        ps = None
+        for attempt in range(3):
+            ps = self._refresh_portfolio_state()
+            if ps is not None:
+                break
+            await asyncio.sleep(10)
+        if ps is None:
+            logger.warning("EOD catchup: cannot refresh portfolio — deferring to scheduled run")
+            return
+
+        self._portfolio_state = ps
+        logger.warning(
+            "EOD catchup FIRING (post-16:05 startup with missing reports) — "
+            "daily_done=%s weekly_due=%s weekly_done=%s monthly_due=%s monthly_done=%s",
+            daily_done, weekly_due, weekly_done, monthly_due, monthly_done,
+        )
+        self._reporter.on_session_close(
+            today=today,
+            equity_end=ps.equity,
+            equity_start_of_day=ps.session_open_equity,
+            engine_state=self._build_engine_state_for_email(),
+        )
+
     async def _eod_scheduler_loop(self) -> None:
         """Wake up at 16:05 ET each weekday and ensure the daily email fired.
 
@@ -824,6 +878,16 @@ class MLTrader:
         of market close.
         """
         logger.info("EOD scheduler started — daily email guaranteed at 16:05 ET")
+
+        # Startup catchup: if the scheduler is starting AFTER today's 16:05
+        # ET checkpoint and today's email hasn't gone out yet, fire it now
+        # rather than waiting until tomorrow. Handles the edge case where
+        # the trader was restarted between 16:00 and the next 16:05 trigger.
+        try:
+            await self._eod_catchup_if_needed()
+        except Exception:
+            logger.error("EOD startup catchup failed:\n%s", traceback.format_exc())
+
         while self._running:
             try:
                 sleep_secs = self._seconds_until_next_eod_check()
@@ -1070,23 +1134,12 @@ class MLTrader:
                 )
             except Exception:
                 pass
-            # Only send shutdown report if today's daily email hasn't been sent.
-            # Source-of-truth is the reporter's persistent state — survives
-            # restarts so we don't double-send across reboots.
-            shutdown_today = datetime.now(timezone.utc).date()
-            if not self._reporter.was_daily_sent_today(shutdown_today):
-                try:
-                    self._reporter.on_session_close(
-                        today=shutdown_today,
-                        equity_end=self._portfolio_state.equity,
-                        equity_start_of_day=self._portfolio_state.session_open_equity,
-                        engine_state=self._build_engine_state_for_email(),
-                    )
-                except Exception:
-                    logger.error(
-                        "PerformanceReporter.on_session_close failed:\n%s",
-                        traceback.format_exc(),
-                    )
+            # NB: shutdown does NOT trigger any email. The async EOD
+            # safety-net scheduler at 16:05 ET handles delivery reliably,
+            # and restarts during the day used to spam premature "daily
+            # reports" with no trade activity. The startup catchup in
+            # _eod_scheduler_loop handles the edge case where a restart
+            # happens between 16:00 and 16:05 ET.
 
         try:
             self._structured_logger.flush()
