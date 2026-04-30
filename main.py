@@ -15,8 +15,9 @@ import signal
 import sys
 import threading
 import traceback
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -491,22 +492,26 @@ class MLTrader:
                         self._alerting.eod_flat_failed(pos_asset, now)
 
         # ----------------------------------------------------------------
-        # EOD performance report — fire once per day on first bar in the
-        # hard-close window (≥ 15:55 ET), regardless of open positions
+        # EOD performance report — fast path. Fires when a bar arrives in
+        # the hard-close window (≥ 15:55 ET). The reporter's persistent
+        # state file is the source of truth for "did this fire?", so we
+        # never double-send. The async _eod_scheduler_loop is the safety
+        # net at 16:05 ET if no bar arrives during the hard-close window.
         # ----------------------------------------------------------------
         eod_today = now.date()
         if (
             self._session_manager.is_eod_hard_close(asset, now)
-            and self._last_eod_report_date != eod_today
+            and not self._reporter.was_daily_sent_today(eod_today)
             and self._portfolio_state is not None
         ):
-            self._last_eod_report_date = eod_today
             try:
                 self._reporter.on_session_close(
                     today=eod_today,
                     equity_end=self._portfolio_state.equity,
                     equity_start_of_day=self._portfolio_state.session_open_equity,
+                    engine_state=self._build_engine_state_for_email(),
                 )
+                self._last_eod_report_date = eod_today
             except Exception:
                 logger.error("EOD report failed:\n%s", traceback.format_exc())
 
@@ -740,6 +745,139 @@ class MLTrader:
         except Exception:
             logger.warning("_save_feature_history failed:\n%s", traceback.format_exc())
 
+    # ------------------------------------------------------------------
+    # EOD email — async safety net
+    # ------------------------------------------------------------------
+
+    def _seconds_until_next_eod_check(self) -> int:
+        """Returns seconds until 16:05 ET on the next weekday."""
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        target = et_now.replace(hour=16, minute=5, second=0, microsecond=0)
+        if et_now >= target:
+            target += timedelta(days=1)
+        # Skip weekends (5 = Sat, 6 = Sun)
+        while target.weekday() >= 5:
+            target += timedelta(days=1)
+        delta = (target - et_now).total_seconds()
+        return max(60, int(delta))
+
+    def _build_engine_state_for_email(self) -> dict:
+        """Snapshot of engine state for inclusion in the daily email."""
+        per_asset: dict = {}
+        for asset, hmm in self._hmm_engines.items():
+            regime = hmm.get_current_regime().value if hmm.is_trained else "UNKNOWN"
+            conf   = hmm.get_confidence() if hmm.is_trained else 0.0
+            fe = self._feature_engineers.get(asset)
+            warmup = (
+                f"{fe.bars_in_history}/{fe.min_history_bars}"
+                if fe else "?"
+            )
+            per_asset[asset] = {
+                "regime":     regime,
+                "confidence": conf,
+                "warmup":     warmup,
+            }
+
+        # Today's signal histogram
+        sigs = []
+        try:
+            sigs = list(self._orchestrator.get_signal_history())
+        except Exception:
+            pass
+        today_iso = datetime.now(timezone.utc).date().isoformat()
+        today_sigs = [s for s in sigs if str(s.get("ts", "")).startswith(today_iso)]
+        reasons: dict[str, int] = {}
+        for s in today_sigs:
+            r = s.get("reason", "?")
+            reasons[r] = reasons.get(r, 0) + 1
+
+        # Uptime
+        uptime = "?"
+        try:
+            started = getattr(self, "_started_at", None)
+            if started:
+                delta = datetime.now(timezone.utc) - started
+                hours = int(delta.total_seconds() // 3600)
+                mins  = int((delta.total_seconds() % 3600) // 60)
+                uptime = f"{hours}h {mins:02d}m"
+        except Exception:
+            pass
+
+        return {
+            "hmm_trained":            all(h.is_trained for h in self._hmm_engines.values()),
+            "bars_archived":          sum(len(d) for d in self._bar_archives.values()),
+            "bars_today":             sum(self._session_manager.get_bars_since_open(a) for a in self._assets),
+            "signals_today":          len(today_sigs),
+            "signal_reasons":         reasons,
+            "open_positions":         len(self._portfolio_state.positions) if self._portfolio_state else 0,
+            "circuit_breaker_active": self._circuit_breaker.is_active() if self._circuit_breaker else False,
+            "per_asset":              per_asset,
+            "uptime":                 uptime,
+        }
+
+    async def _eod_scheduler_loop(self) -> None:
+        """Wake up at 16:05 ET each weekday and ensure the daily email fired.
+
+        This is the safety net for the bar-based fast-path trigger. Even if no
+        bar arrives during the hard-close window (websocket reconnect, network
+        blip, Alpaca data delay), the daily email goes out within 5 minutes
+        of market close.
+        """
+        logger.info("EOD scheduler started — daily email guaranteed at 16:05 ET")
+        while self._running:
+            try:
+                sleep_secs = self._seconds_until_next_eod_check()
+                logger.info(
+                    "EOD scheduler: next check in %d seconds (%.1f hours)",
+                    sleep_secs, sleep_secs / 3600,
+                )
+                await asyncio.sleep(sleep_secs)
+                if not self._running:
+                    break
+
+                today = datetime.now(timezone.utc).date()
+                if self._reporter.was_daily_sent_today(today):
+                    logger.info("EOD scheduler: daily email already sent today — skipping")
+                    continue
+
+                # Refresh portfolio state — retry up to 3× if Alpaca momentarily down
+                ps = None
+                for attempt in range(3):
+                    ps = self._refresh_portfolio_state()
+                    if ps is not None:
+                        break
+                    logger.warning(
+                        "EOD scheduler: portfolio refresh failed (attempt %d/3), retrying in 30s",
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(30)
+
+                if ps is None:
+                    logger.error("EOD scheduler: cannot refresh portfolio — skipping email")
+                    continue
+
+                self._portfolio_state = ps
+                logger.info(
+                    "EOD scheduler: firing daily email — equity=$%.2f, day_open=$%.2f",
+                    ps.equity, ps.session_open_equity,
+                )
+                self._reporter.on_session_close(
+                    today=today,
+                    equity_end=ps.equity,
+                    equity_start_of_day=ps.session_open_equity,
+                    engine_state=self._build_engine_state_for_email(),
+                )
+                self._last_eod_report_date = today
+            except asyncio.CancelledError:
+                logger.info("EOD scheduler cancelled — exiting cleanly")
+                break
+            except Exception:
+                logger.error(
+                    "EOD scheduler error — backing off 5 minutes:\n%s",
+                    traceback.format_exc(),
+                )
+                await asyncio.sleep(300)
+
     def _load_feature_history(self) -> None:
         """Restore each FeatureEngineer's rolling bar window from disk."""
         import pickle
@@ -842,6 +980,12 @@ class MLTrader:
 
         logger.info("Streaming started — waiting for bars …")
         self._running = True
+        self._started_at = datetime.now(timezone.utc)
+
+        # Spawn EOD safety-net scheduler — guarantees daily email at 16:05 ET
+        self._eod_scheduler_task: Optional[asyncio.Task] = asyncio.create_task(
+            self._eod_scheduler_loop()
+        )
 
         # Bar dispatch loop
         while self._running:
@@ -872,6 +1016,11 @@ class MLTrader:
         """Stop streaming, close all positions, flush logs."""
         logger.warning("SHUTDOWN_INITIATED")
         self._running = False
+
+        # Cancel the EOD scheduler so it doesn't keep waiting on its sleep
+        eod_task = getattr(self, "_eod_scheduler_task", None)
+        if eod_task is not None and not eod_task.done():
+            eod_task.cancel()
 
         # Persist bar archives before anything else so a crash-shutdown
         # doesn't lose the training history collected since last restart.
@@ -904,14 +1053,17 @@ class MLTrader:
                 )
             except Exception:
                 pass
-            # Only send shutdown report if EOD report hasn't already fired today
+            # Only send shutdown report if today's daily email hasn't been sent.
+            # Source-of-truth is the reporter's persistent state — survives
+            # restarts so we don't double-send across reboots.
             shutdown_today = datetime.now(timezone.utc).date()
-            if self._last_eod_report_date != shutdown_today:
+            if not self._reporter.was_daily_sent_today(shutdown_today):
                 try:
                     self._reporter.on_session_close(
                         today=shutdown_today,
                         equity_end=self._portfolio_state.equity,
                         equity_start_of_day=self._portfolio_state.session_open_equity,
+                        engine_state=self._build_engine_state_for_email(),
                     )
                 except Exception:
                     logger.error(

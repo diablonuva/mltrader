@@ -380,6 +380,69 @@ def _build_performance_body(
     return body
 
 
+def _build_engine_state_section(engine_state: dict) -> str:
+    """Optional 'Today's Engine Activity' section for the daily email.
+
+    engine_state is a free-form dict produced by MLTrader._build_engine_state_for_email.
+    All keys are optional — missing keys are silently skipped so the format
+    stays forward-compatible.
+    """
+    body = _section_header("Today's Engine Activity")
+
+    # Top-line KPIs: HMM trained, regimes detected, signals, positions
+    cb_active = engine_state.get("circuit_breaker_active", False)
+    cb_color = "#EF5350" if cb_active else "#00E676"
+    cb_text  = "TRIPPED" if cb_active else "OK"
+
+    body += _kpi_row(
+        ("HMM Trained", "✓ Yes" if engine_state.get("hmm_trained") else "✗ No",
+         "#00E676" if engine_state.get("hmm_trained") else "#EF5350"),
+        ("Bars Archived", str(engine_state.get("bars_archived", 0)), "#e0e0e0"),
+        ("Signals Today", str(engine_state.get("signals_today", 0)), "#e0e0e0"),
+        ("Open Positions @ EOD", str(engine_state.get("open_positions", 0)),
+         "#FFC107" if engine_state.get("open_positions", 0) > 0 else "#9aa0b4"),
+    )
+    body += "<br>"
+    body += _kpi_row(
+        ("Circuit Breaker", cb_text, cb_color),
+        ("Trader Uptime", engine_state.get("uptime", "?"), "#e0e0e0"),
+        ("Bars Today", str(engine_state.get("bars_today", 0)), "#e0e0e0"),
+    )
+
+    # Per-asset regime snapshot
+    per_asset = engine_state.get("per_asset", {})
+    if per_asset:
+        rows = []
+        for asset, info in per_asset.items():
+            regime = info.get("regime", "UNKNOWN")
+            conf   = info.get("confidence", 0.0)
+            warmup = info.get("warmup", "?")
+            rows.append([
+                asset,
+                regime.replace("_", " "),
+                f"{conf*100:.0f}%",
+                warmup,
+            ])
+        body += _table(
+            ["Asset", "Regime @ Close", "Confidence", "Feature Warmup"],
+            rows,
+            ["left", "left", "right", "right"],
+        )
+
+    # Signal-reason histogram (why no trades, when applicable)
+    reasons = engine_state.get("signal_reasons", {})
+    if reasons:
+        body += _section_header("Signal Outcomes (today)")
+        rows = sorted(reasons.items(), key=lambda x: -x[1])
+        body += _table(
+            ["Reason", "Count"],
+            [[r, str(c)] for r, c in rows],
+            ["left", "right"],
+        )
+
+    return body
+
+
 def _build_circuit_breaker_body(
     reason: str,
     equity: float,
@@ -508,13 +571,26 @@ class PerformanceReporter:
     # Public API
     # ------------------------------------------------------------------
 
+    def was_daily_sent_today(self, today: date) -> bool:
+        """True iff a daily email was successfully delivered for `today`.
+
+        Used by the bar-trigger and the EOD safety-net scheduler to avoid
+        duplicate sends. Reads from persistent state, so it survives restarts.
+        """
+        return self._state.get("last_daily_report") == today.isoformat()
+
     def on_session_close(
         self,
         today: date,
         equity_end: float,
         equity_start_of_day: float,
+        engine_state: Optional[dict] = None,
     ) -> None:
-        """Call at EOD. Sends whichever reports are due for today."""
+        """Call at EOD. Sends whichever reports are due for today.
+
+        Pass `engine_state` (a dict from MLTrader._build_engine_state_for_email)
+        to include an Engine Activity section in the daily email body.
+        """
         if not self._enabled or not self._to_address:
             return
 
@@ -529,7 +605,10 @@ class PerformanceReporter:
         today_trades = _read_trades(self._log_dir, since=today)
 
         # --- Daily ---
-        self._send_daily(today, today_trades, equity_start_of_day, equity_end)
+        sent_ok = self._send_daily(today, today_trades, equity_start_of_day, equity_end, engine_state)
+        if sent_ok:
+            self._state["last_daily_report"] = today.isoformat()
+            _save_state(self._state_path, self._state)
 
         # --- Weekly (every Friday) ---
         if today.weekday() == 4:
@@ -617,12 +696,16 @@ class PerformanceReporter:
         trades: list[dict],
         eq_start: float,
         eq_end: float,
-    ) -> None:
+        engine_state: Optional[dict] = None,
+    ) -> bool:
+        """Returns True iff the email was successfully delivered."""
         stats = _compute_stats(trades)
         body = _build_performance_body(
             "DAILY", stats, eq_start, eq_end,
             f"{today.strftime('%A, %d %b %Y')}",
         )
+        if engine_state:
+            body += _build_engine_state_section(engine_state)
         mode = "PAPER" if self._is_paper else "LIVE"
         html = _html_wrap(
             title=f"Daily Report {today}",
@@ -630,7 +713,7 @@ class PerformanceReporter:
             body=body,
             is_paper=self._is_paper,
         )
-        self._send(
+        return self._send(
             subject=f"[ML Trader {mode}] Daily Report — {today.strftime('%d %b %Y')}",
             html=html,
         )
@@ -734,13 +817,14 @@ class PerformanceReporter:
     # Private: SMTP delivery
     # ------------------------------------------------------------------
 
-    def _send(self, subject: str, html: str) -> None:
+    def _send(self, subject: str, html: str) -> bool:
+        """Returns True iff the email was successfully delivered."""
         if not self._smtp_user or not self._smtp_password:
             logger.warning(
                 "PerformanceReporter: SMTP_USER or SMTP_PASSWORD not set — "
                 "email skipped. Add these to your .env file."
             )
-            return
+            return False
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
@@ -763,8 +847,10 @@ class PerformanceReporter:
                 smtp.sendmail(self._smtp_from, [self._to_address], msg.as_string())
 
             logger.info("PerformanceReporter: sent '%s' → %s", subject, self._to_address)
+            return True
         except Exception:
             logger.error(
                 "PerformanceReporter: email delivery failed for '%s':\n%s",
                 subject, traceback.format_exc(),
             )
+            return False

@@ -305,8 +305,79 @@ done
 mode=$(curl -s http://localhost:8501/api/meta 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('mode'))" 2>/dev/null || echo "?")
 [[ "$mode" == "PAPER" ]] && pass "/api/meta reports mode=PAPER" || fail "/api/meta reports mode=$mode" "Live Trading Switch unlocked!"
 
-# ── 8. AUTONOMY / SURVIVABILITY ────────────────────────────────────────────
-section "8. Autonomy & survivability"
+# ── 8a. EMAIL PIPELINE ──────────────────────────────────────────────────────
+section "8. Email pipeline (daily EOD report)"
+
+# Read email config from settings.yaml
+email_enabled=$(python3 -c "import yaml; c=yaml.safe_load(open('config/settings.yaml')); print(c.get('monitoring',{}).get('alert_email_enabled', False))" 2>/dev/null)
+email_to=$(python3 -c "import yaml; c=yaml.safe_load(open('config/settings.yaml')); print(c.get('monitoring',{}).get('alert_email_address', ''))" 2>/dev/null)
+
+if [[ "$email_enabled" == "True" ]]; then
+  pass "alert_email_enabled = True"
+else
+  warn "alert_email_enabled = $email_enabled" "EOD reports will NOT be sent — set monitoring.alert_email_enabled: true in settings.yaml"
+fi
+
+if [[ -n "$email_to" && "$email_to" != "None" ]]; then
+  pass "alert_email_address = $email_to"
+else
+  fail "alert_email_address empty" "EOD reports have no destination"
+fi
+
+# SMTP credentials (env vars override settings.yaml)
+for k in SMTP_USER SMTP_PASSWORD; do
+  if grep -qE "^${k}=" .env 2>/dev/null; then
+    val=$(grep -E "^${k}=" .env | head -1 | cut -d= -f2-)
+    if [[ -z "$val" ]]; then
+      fail "  $k empty in .env" "no email auth → all daily reports will be skipped"
+    else
+      pass "  $k set" "${#val} chars"
+    fi
+  else
+    fail "  $k missing from .env" "no email auth → all daily reports will be skipped"
+  fi
+done
+
+# Was today's daily email sent?
+if [[ -f logs/reporter_state.json ]]; then
+  last_sent=$(python3 -c "import json; print(json.load(open('logs/reporter_state.json')).get('last_daily_report','never'))" 2>/dev/null)
+  today_iso=$(date -u +%Y-%m-%d)
+  if [[ "$last_sent" == "$today_iso" ]]; then
+    pass "today's daily email sent" "last_daily_report=$last_sent"
+  elif [[ "$last_sent" == "never" ]]; then
+    warn "no daily email ever sent" "first one fires at next market close (16:05 ET)"
+  else
+    pass "last_daily_report = $last_sent" "(previous trading day — today's will fire at 16:05 ET)"
+  fi
+else
+  warn "logs/reporter_state.json missing" "first daily email will create it"
+fi
+
+# Estimate next EOD email time
+next_eod=$(python3 - <<'PY'
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+et = datetime.now(ZoneInfo("America/New_York"))
+target = et.replace(hour=16, minute=5, second=0, microsecond=0)
+if et >= target:
+    target += timedelta(days=1)
+while target.weekday() >= 5:
+    target += timedelta(days=1)
+delta_h = (target - et).total_seconds() / 3600
+print(f"{target.strftime('%a %d %b %H:%M %Z')} (in {delta_h:.1f}h)")
+PY
+)
+echo -e "  ${COL_DIM}↳ next scheduled email: $next_eod${COL_RESET}"
+
+# Verify EOD scheduler task is running inside the trader (look for log line)
+if docker compose logs trader --since 24h 2>&1 | grep -q "EOD scheduler started"; then
+  pass "EOD scheduler started log line found" "safety net is active"
+else
+  warn "no 'EOD scheduler started' log line in last 24h" "may need a trader restart to activate the new safety net"
+fi
+
+# ── 9. AUTONOMY / SURVIVABILITY ────────────────────────────────────────────
+section "9. Autonomy & survivability"
 
 # Log rotation configured? Use {{index ... "key"}} because Go templates
 # parse "max-size" as subtraction with the dotted notation.
