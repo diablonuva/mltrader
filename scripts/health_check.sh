@@ -407,12 +407,13 @@ PY
 echo -e "  ${COL_DIM}↳ next scheduled email: $next_eod${COL_RESET}"
 
 # Verify EOD scheduler task is running inside the trader.
-# Use multiple log windows because `--since 24h` has been observed to return
-# nothing intermittently on Pi/compose-v2; fall back to longer windows if
-# the smallest doesn't catch a recent restart.
+# NOTE: a subshell wraps the pipeline so SIGPIPE from `grep -q` (which
+# exits early on first match) doesn't propagate up through `set -o pipefail`
+# and falsely mark the check as failed. Iterate windows in case the most
+# recent restart is older than 30m.
 sched_found=false
 for window in 30m 2h 12h 7d; do
-  if docker compose logs trader --since "$window" 2>&1 | grep -q "EOD scheduler started"; then
+  if (set +o pipefail; docker compose logs trader --since "$window" 2>&1 | grep -q "EOD scheduler started"); then
     pass "EOD scheduler started log line found" "safety net is active (matched in last $window)"
     sched_found=true
     break
