@@ -30,7 +30,7 @@ from src.config_loader import load_config, validate_config
 from src.models import AssetClass, BarData, ExitReason, PortfolioState, RegimeLabel
 from src.monitoring.alerting import AlertingSystem
 from src.monitoring.logger import StructuredLogger
-from src.monitoring.performance_reporter import PerformanceReporter
+from src.monitoring.performance_reporter import PerformanceReporter, _is_last_trading_day_of_month as _is_last_trading_day_of_month_safe
 from src.risk.circuit_breaker import CircuitBreaker
 from src.risk.pdt_guard import PDTGuard
 from src.risk.risk_manager import RiskManager
@@ -836,8 +836,23 @@ class MLTrader:
                     break
 
                 today = datetime.now(timezone.utc).date()
-                if self._reporter.was_daily_sent_today(today):
-                    logger.info("EOD scheduler: daily email already sent today — skipping")
+
+                # Skip the entire pass only if EVERY report type that's due
+                # today has already been sent — otherwise on_session_close
+                # will internally skip what's done and retry what's missing.
+                daily_done   = self._reporter.was_daily_sent_today(today)
+                weekly_due   = today.weekday() == 4
+                weekly_done  = (not weekly_due) or self._reporter.was_weekly_sent_for_isoweek(today)
+                monthly_due  = _is_last_trading_day_of_month_safe(today)
+                monthly_done = (not monthly_due) or self._reporter.was_monthly_sent_for_month(today)
+
+                if daily_done and weekly_done and monthly_done:
+                    logger.info(
+                        "EOD scheduler: all due reports already sent (daily=%s weekly=%s monthly=%s) — skipping",
+                        daily_done,
+                        "n/a" if not weekly_due else weekly_done,
+                        "n/a" if not monthly_due else monthly_done,
+                    )
                     continue
 
                 # Refresh portfolio state — retry up to 3× if Alpaca momentarily down
@@ -858,8 +873,10 @@ class MLTrader:
 
                 self._portfolio_state = ps
                 logger.info(
-                    "EOD scheduler: firing daily email — equity=$%.2f, day_open=$%.2f",
+                    "EOD scheduler: firing on_session_close — equity=$%.2f, day_open=$%.2f "
+                    "(daily_done=%s weekly_due=%s weekly_done=%s monthly_due=%s monthly_done=%s)",
                     ps.equity, ps.session_open_equity,
+                    daily_done, weekly_due, weekly_done, monthly_due, monthly_done,
                 )
                 self._reporter.on_session_close(
                     today=today,

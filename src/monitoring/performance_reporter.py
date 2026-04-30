@@ -571,13 +571,28 @@ class PerformanceReporter:
     # Public API
     # ------------------------------------------------------------------
 
-    def was_daily_sent_today(self, today: date) -> bool:
-        """True iff a daily email was successfully delivered for `today`.
+    @staticmethod
+    def _isoweek_key(d: date) -> str:
+        """Idempotency key for weekly reports (e.g. '2026-W18')."""
+        year, week, _ = d.isocalendar()
+        return f"{year}-W{week:02d}"
 
-        Used by the bar-trigger and the EOD safety-net scheduler to avoid
-        duplicate sends. Reads from persistent state, so it survives restarts.
-        """
+    @staticmethod
+    def _month_key(d: date) -> str:
+        """Idempotency key for monthly reports (e.g. '2026-04')."""
+        return f"{d.year}-{d.month:02d}"
+
+    def was_daily_sent_today(self, today: date) -> bool:
+        """True iff a daily email was successfully delivered for `today`."""
         return self._state.get("last_daily_report") == today.isoformat()
+
+    def was_weekly_sent_for_isoweek(self, today: date) -> bool:
+        """True iff a weekly email was successfully delivered for `today`'s ISO week."""
+        return self._state.get("last_weekly_report") == self._isoweek_key(today)
+
+    def was_monthly_sent_for_month(self, today: date) -> bool:
+        """True iff a monthly email was successfully delivered for `today`'s month."""
+        return self._state.get("last_monthly_report") == self._month_key(today)
 
     def on_session_close(
         self,
@@ -587,6 +602,10 @@ class PerformanceReporter:
         engine_state: Optional[dict] = None,
     ) -> None:
         """Call at EOD. Sends whichever reports are due for today.
+
+        Each report type (daily/weekly/monthly/8-week) is independently
+        idempotent — repeated calls within the same period are safe and
+        will retry only the reports that haven't been successfully sent.
 
         Pass `engine_state` (a dict from MLTrader._build_engine_state_for_email)
         to include an Engine Activity section in the daily email body.
@@ -605,21 +624,34 @@ class PerformanceReporter:
         today_trades = _read_trades(self._log_dir, since=today)
 
         # --- Daily ---
-        sent_ok = self._send_daily(today, today_trades, equity_start_of_day, equity_end, engine_state)
-        if sent_ok:
-            self._state["last_daily_report"] = today.isoformat()
-            _save_state(self._state_path, self._state)
+        if not self.was_daily_sent_today(today):
+            sent_ok = self._send_daily(today, today_trades, equity_start_of_day, equity_end, engine_state)
+            if sent_ok:
+                self._state["last_daily_report"] = today.isoformat()
+                _save_state(self._state_path, self._state)
+        else:
+            logger.info("PerformanceReporter: daily already sent for %s — skipping", today)
 
         # --- Weekly (every Friday) ---
         if today.weekday() == 4:
-            week_start = date.fromisocalendar(today.isocalendar()[0],
-                                              today.isocalendar()[1], 1)
-            week_trades = _read_trades(self._log_dir, since=week_start)
-            week_eq_start = self._state.get("week_equity_start", equity_start_of_day)
-            self._send_weekly(today, week_trades, float(week_eq_start), equity_end)
-            # Reset week equity start for next week
-            self._state["week_equity_start"] = equity_end
-            _save_state(self._state_path, self._state)
+            if not self.was_weekly_sent_for_isoweek(today):
+                week_start = date.fromisocalendar(today.isocalendar()[0],
+                                                  today.isocalendar()[1], 1)
+                week_trades = _read_trades(self._log_dir, since=week_start)
+                week_eq_start = self._state.get("week_equity_start", equity_start_of_day)
+                sent_ok = self._send_weekly(today, week_trades, float(week_eq_start), equity_end)
+                if sent_ok:
+                    # Mark sent + advance equity baseline only on success.
+                    # Failure leaves baseline unchanged so next attempt
+                    # still computes the correct period return.
+                    self._state["last_weekly_report"] = self._isoweek_key(today)
+                    self._state["week_equity_start"] = equity_end
+                    _save_state(self._state_path, self._state)
+            else:
+                logger.info(
+                    "PerformanceReporter: weekly already sent for %s — skipping",
+                    self._isoweek_key(today),
+                )
 
         # Track Monday as start of new week's equity baseline
         if today.weekday() == 0:
@@ -628,12 +660,20 @@ class PerformanceReporter:
 
         # --- Monthly (last trading day of month) ---
         if _is_last_trading_day_of_month(today):
-            month_start = today.replace(day=1)
-            month_trades = _read_trades(self._log_dir, since=month_start)
-            month_eq_start = self._state.get("month_equity_start", self._initial_equity)
-            self._send_monthly(today, month_trades, float(month_eq_start), equity_end)
-            self._state["month_equity_start"] = equity_end
-            _save_state(self._state_path, self._state)
+            if not self.was_monthly_sent_for_month(today):
+                month_start = today.replace(day=1)
+                month_trades = _read_trades(self._log_dir, since=month_start)
+                month_eq_start = self._state.get("month_equity_start", self._initial_equity)
+                sent_ok = self._send_monthly(today, month_trades, float(month_eq_start), equity_end)
+                if sent_ok:
+                    self._state["last_monthly_report"] = self._month_key(today)
+                    self._state["month_equity_start"] = equity_end
+                    _save_state(self._state_path, self._state)
+            else:
+                logger.info(
+                    "PerformanceReporter: monthly already sent for %s — skipping",
+                    self._month_key(today),
+                )
 
         if today.day == 1:
             self._state["month_equity_start"] = equity_start_of_day
@@ -724,7 +764,8 @@ class PerformanceReporter:
         trades: list[dict],
         eq_start: float,
         eq_end: float,
-    ) -> None:
+    ) -> bool:
+        """Returns True iff the email was successfully delivered."""
         week_start = date.fromisocalendar(
             friday.isocalendar()[0], friday.isocalendar()[1], 1
         )
@@ -740,7 +781,7 @@ class PerformanceReporter:
             body=body,
             is_paper=self._is_paper,
         )
-        self._send(
+        return self._send(
             subject=(
                 f"[ML Trader {mode}] Weekly Report — "
                 f"W{friday.isocalendar()[1]} {friday.year}"
@@ -754,7 +795,8 @@ class PerformanceReporter:
         trades: list[dict],
         eq_start: float,
         eq_end: float,
-    ) -> None:
+    ) -> bool:
+        """Returns True iff the email was successfully delivered."""
         stats = _compute_stats(trades)
         body = _build_performance_body(
             "MONTHLY", stats, eq_start, eq_end,
@@ -767,7 +809,7 @@ class PerformanceReporter:
             body=body,
             is_paper=self._is_paper,
         )
-        self._send(
+        return self._send(
             subject=(
                 f"[ML Trader {mode}] Monthly Report — "
                 f"{last_day.strftime('%B %Y')}"

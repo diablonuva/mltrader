@@ -338,19 +338,56 @@ for k in SMTP_USER SMTP_PASSWORD; do
   fi
 done
 
-# Was today's daily email sent?
+# Per-type send tracking (daily / weekly / monthly)
 if [[ -f logs/reporter_state.json ]]; then
-  last_sent=$(python3 -c "import json; print(json.load(open('logs/reporter_state.json')).get('last_daily_report','never'))" 2>/dev/null)
-  today_iso=$(date -u +%Y-%m-%d)
-  if [[ "$last_sent" == "$today_iso" ]]; then
-    pass "today's daily email sent" "last_daily_report=$last_sent"
-  elif [[ "$last_sent" == "never" ]]; then
-    warn "no daily email ever sent" "first one fires at next market close (16:05 ET)"
-  else
-    pass "last_daily_report = $last_sent" "(previous trading day — today's will fire at 16:05 ET)"
-  fi
+  python3 - <<'PY' 2>/dev/null
+import json, sys
+from datetime import date
+state = json.load(open('logs/reporter_state.json'))
+today = date.today()
+year, week, _ = today.isocalendar()
+isoweek_key = f"{year}-W{week:02d}"
+month_key   = f"{today.year}-{today.month:02d}"
+
+ld = state.get('last_daily_report',   'never')
+lw = state.get('last_weekly_report',  'never')
+lm = state.get('last_monthly_report', 'never')
+
+PASS = "\033[32m✓ PASS\033[0m"
+WARN = "\033[33m⚠ WARN\033[0m"
+
+# Daily — should match today's date for today's email
+if ld == today.isoformat():
+    print(f"  {PASS}  daily report sent today    \033[2m— last_daily_report={ld}\033[0m")
+elif ld == 'never':
+    print(f"  {WARN}  no daily ever sent          \033[2m— first one at next market close (16:05 ET)\033[0m")
+else:
+    print(f"  {PASS}  last daily report = {ld}  \033[2m— today's will fire at 16:05 ET\033[0m")
+
+# Weekly — should match this ISO week if today is Friday or later in the week
+if lw == isoweek_key:
+    print(f"  {PASS}  weekly report sent this week  \033[2m— last_weekly_report={lw}\033[0m")
+elif lw == 'never':
+    print(f"  {WARN}  no weekly ever sent           \033[2m— first one fires Friday at 16:05 ET\033[0m")
+elif today.weekday() < 4:
+    print(f"  {PASS}  last weekly report = {lw}  \033[2m— next fires Friday at 16:05 ET\033[0m")
+else:
+    # We're Friday or later but no weekly for this week yet
+    if today.weekday() == 4:
+        print(f"  {WARN}  weekly not yet sent for {isoweek_key}  \033[2m— will fire today at 16:05 ET\033[0m")
+    else:
+        print(f"  {WARN}  weekly missed for {isoweek_key}  \033[2m— previous Friday's email failed\033[0m")
+
+# Monthly — should match this month for the last trading day of the month
+if lm == month_key:
+    print(f"  {PASS}  monthly report sent this month  \033[2m— last_monthly_report={lm}\033[0m")
+elif lm == 'never':
+    print(f"  {WARN}  no monthly ever sent            \033[2m— fires on last trading day of month at 16:05 ET\033[0m")
+else:
+    print(f"  {PASS}  last monthly report = {lm}  \033[2m— next fires on last trading day of {month_key}\033[0m")
+PY
 else
-  warn "logs/reporter_state.json missing" "first daily email will create it"
+  warn "logs/reporter_state.json missing" "first email will create it"
 fi
 
 # Estimate next EOD email time
